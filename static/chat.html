@@ -458,6 +458,11 @@
       <input type="text" id="settingsModel" placeholder="deepseek-v4-flash"
              style="width:100%;padding:10px 12px;background:#0f1117;border:1px solid #333;border-radius:6px;color:#e0e0e0;font-size:14px;outline:none;">
     </div>
+    <!-- 客户端节点状态 -->
+    <div id="settingsNodes" style="margin-bottom:12px;">
+      <div style="font-size:13px;color:#aaa;font-weight:500;margin-bottom:4px;">🖥️ 已连接设备</div>
+      <div id="settingsNodeList" style="font-size:12px;color:#555;">加载中...</div>
+    </div>
     <div id="settingsMsg" style="font-size:12px;padding:6px 10px;border-radius:4px;margin-bottom:10px;display:none;"></div>
     <div class="actions">
       <button class="btn secondary" onclick="closeSettings()">取消</button>
@@ -1124,6 +1129,35 @@ async function openSettings() {
     document.getElementById('settingsModel').value = data.model || '';
   } catch(e) {
     console.error('加载设置失败:', e);
+  }
+  refreshNodes();
+}
+
+async function refreshNodes() {
+  try {
+    const data = await api('GET', '/api/nodes');
+    const listEl = document.getElementById('settingsNodeList');
+    if (!data.nodes || data.nodes.length === 0) {
+      listEl.innerHTML = '<span style="color:#444;">无设备连接。运行 <code>python client.py</code> 连接本机。</span>';
+      return;
+    }
+    let html = '';
+    data.nodes.forEach(n => {
+      const dot = n.online ? '<span style="color:#4ade80;">●</span>' : '<span style="color:#555;">○</span>';
+      const mode = n.interactive ? '确认' : '自动';
+      const tools = n.tool_names.map(t => '<code style="font-size:10px;background:#1a1d2e;padding:1px 4px;border-radius:2px;">' + escapeHtml(t) + '</code>').join(' ');
+      html +=
+        '<div style="background:#141620;border:1px solid #2a2a3a;border-radius:6px;padding:8px;margin-bottom:6px;">' +
+          '<div style="display:flex;align-items:center;gap:6px;">' +
+            dot + ' <span style="color:#a29bfe;font-weight:500;">' + escapeHtml(n.name) + '</span>' +
+            '<span style="font-size:10px;color:#666;margin-left:auto;">' + mode + '</span>' +
+          '</div>' +
+          '<div style="margin-top:4px;">' + (tools || '<span style="color:#444;">无工具</span>') + '</div>' +
+        '</div>';
+    });
+    listEl.innerHTML = html;
+  } catch(e) {
+    console.error('加载节点失败:', e);
   }
 }
 

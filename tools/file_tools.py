@@ -21,11 +21,13 @@ BLOCKED_DIRECTORIES = [
     os.path.abspath(os.path.join(PROJECT_ROOT, "memory.db")),
 ]
 
-# 但允许访问项目公共目录
-ALLOWED_PUBLIC_DIRECTORIES = [
-    os.path.abspath(os.path.join(PROJECT_ROOT, "tools")),      # 公共工具源码
-    os.path.abspath(os.path.join(PROJECT_ROOT, "static")),     # 静态文件
-    os.path.abspath(PROJECT_ROOT),                             # 根目录文件（如 server.py）
+# 写保护：禁止 AI 修改服务器核心代码和公共 tools/ 目录
+WRITE_PROTECTED = [
+    os.path.abspath(os.path.join(PROJECT_ROOT, f)) for f in [
+        "server.py", "auth.py", "client.py", "migrate_memory.py",
+        "restart_service.sh", "requirements.txt", ".gitignore",
+        "tools", "static", "client", "data",
+    ]
 ]
 
 
@@ -75,9 +77,9 @@ file_tools = [
         "function": {
             "name": "write_file",
             "description": (
-                "写入或覆盖项目中的文件。可以修改源代码、创建新文件等。"
-                "路径相对于项目根目录。此操作会覆盖已有文件，请谨慎使用。"
-                "注意：只能写入公共目录，不能写入其他用户的私有数据目录。"
+                "写入或覆盖项目中的文件。只能写入 data/user_tools/<用户名>/ 目录下的自定义工具。\n"
+                "⚠ 写保护：禁止修改 server.py / tools/ / static/ / client/ 等服务器核心代码。\n"
+                "如需修改服务器代码，请让人工操作。"
             ),
             "parameters": {
                 "type": "object",
@@ -141,9 +143,17 @@ def read_file(file_path: str) -> str:
 
 
 def write_file(file_path: str, content: str) -> str:
-    """写入项目文件（仅限公共目录）"""
+    """写入项目文件（仅限 user_tools 目录，禁止修改服务器代码和公共 tools）"""
     try:
         abs_path = _safe_path(file_path)
+        # ---- 写保护：禁止修改服务器核心代码和公共 tools ----
+        for protected in WRITE_PROTECTED:
+            if abs_path == protected or abs_path.startswith(protected + os.sep):
+                return (
+                    f"[写保护] 禁止修改服务器核心文件/目录: {file_path}\n"
+                    f"AI 只能通过 data/user_tools/<用户名>/ 创建和修改自定义工具。\n"
+                    f"如需修改服务器代码，请人工操作。"
+                )
         # 确保目录存在
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)
         # 如果文件已存在，做备份

@@ -11,10 +11,15 @@ import json
 import uuid
 import importlib
 import traceback
+import asyncio
+import time
+import copy
+from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Form, WebSocket
+from starlette.websockets import WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
@@ -98,6 +103,160 @@ def _get_user_model(username: str) -> str:
     """获取用户设置的模型名"""
     settings = _load_user_settings(username)
     return settings.get("model") or DEFAULT_MODEL
+
+
+# ============================================================
+#  客户端节点持久化存储 & 内存注册表
+#  持久化文件: data/nodes/<username>.json
+#  内存注册表: node_registry = {username: {node_name: {ws, lock, tools, ...}}}
+#  节点信息在连接/断开时自动持久化，即使服务器重启也不丢失已知节点。
+# ============================================================
+NODES_DIR = os.path.join(os.path.dirname(__file__) or ".", "data", "nodes")
+os.makedirs(NODES_DIR, exist_ok=True)
+node_registry: dict[str, dict[str, dict]] = {}  # 仅在线节点
+
+
+def _get_nodes_path(username: str) -> str:
+    safe = username.replace("/", "_").replace("\\", "_")
+    return os.path.join(NODES_DIR, f"{safe}.json")
+
+
+def _load_nodes(username: str) -> dict:
+    """加载用户的所有已知节点（含在线/离线状态）。"""
+    path = _get_nodes_path(username)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {}
+    return {}
+
+
+def _save_nodes(username: str, data: dict):
+    """保存用户的节点信息到磁盘。"""
+    path = _get_nodes_path(username)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _persist_node_online(username: str, node_name: str, tools: list,
+                          work_root: str, interactive: bool):
+    """节点上线时持久化其信息。"""
+    data = _load_nodes(username)
+    tool_names = [t["function"]["name"] for t in tools]
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data[node_name] = {
+        "tools": tools,
+        "tool_names": tool_names,
+        "online": True,
+        "work_root": work_root,
+        "interactive": interactive,
+        "first_seen": data.get(node_name, {}).get("first_seen", now_str),
+        "last_seen": now_str,
+    }
+    _save_nodes(username, data)
+
+
+def _persist_node_offline(username: str, node_name: str):
+    """节点断开时标记为离线。"""
+    data = _load_nodes(username)
+    if node_name in data:
+        data[node_name]["online"] = False
+        data[node_name]["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _save_nodes(username, data)
+
+
+def _get_node_context(username: str) -> str:
+    """
+    生成 AI 系统提示的节点上下文。
+    告诉 AI 有哪些在线节点及可用工具，以及如何调用。
+    """
+    nodes = node_registry.get(username, {})
+    if not nodes:
+        return ""
+
+    lines = [
+        "",
+        "=== 已连接的客户端节点 ===",
+        "你可以调用以下客户端本地工具（格式: 节点名__工具名），在本地设备上执行操作：",
+    ]
+    for node_name, node_data in nodes.items():
+        tool_names = [t["function"]["name"] for t in node_data.get("tools", [])]
+        wroot = node_data.get("work_root", "")
+        inter = node_data.get("interactive", True)
+        wroot_str = f" · 工作目录:{wroot}" if wroot else ""
+        mode_str = " · 交互模式(需确认)" if inter else " · 自动执行"
+        lines.append(f"\n  [{node_name}]{wroot_str}{mode_str}")
+        for tn in tool_names:
+            lines.append(f"    • {node_name}__{tn}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _get_client_tool_schemas(username: str) -> list:
+    """
+    获取某用户所有已连接节点的工具 JSON Schema。
+    每个工具名加上节点前缀：<节点名>__<工具名>（双下划线，
+    因为 OpenAI API 工具名只允许 [a-zA-Z0-9_-]+，不能含点号）。
+    """
+    schemas = []
+    for node_name, node_data in node_registry.get(username, {}).items():
+        for tool in node_data.get("tools", []):
+            prefixed = copy.deepcopy(tool)
+            original_name = prefixed["function"]["name"]
+            prefixed["function"]["name"] = f"{node_name}__{original_name}"
+            old_desc = prefixed["function"].get("description", "")
+            prefixed["function"]["description"] = (
+                f"[节点:{node_name}] {old_desc}"
+            )
+            schemas.append(prefixed)
+    return schemas
+
+
+async def _call_node_tool(username: str, node_name: str, tool_name: str,
+                           args: dict, timeout: int = 120) -> str:
+    """通过 WebSocket 调用客户端节点的工具并等待结果。使用 asyncio.Lock 防止并发 recv。"""
+    node_data = node_registry.get(username, {}).get(node_name)
+    if not node_data:
+        return f"[ERROR] 节点 '{node_name}' 不在线，请在客户端电脑上运行 client.py 连接"
+
+    ws = node_data["ws"]
+    lock = node_data["lock"]  # 每个连接一个锁，保证串行读写
+    call_id = str(uuid.uuid4())
+
+    try:
+        async with lock:
+            await ws.send_json({
+                "type": "tool_call",
+                "call_id": call_id,
+                "tool": tool_name,
+                "args": args,
+            })
+            response = await asyncio.wait_for(ws.receive_json(), timeout=timeout)
+        if response.get("type") == "tool_result" and response.get("call_id") == call_id:
+            return response.get("result", "")
+        return f"[ERROR] 节点返回了意外的响应"
+    except asyncio.TimeoutError:
+        return f"[ERROR] 节点 '{node_name}' 执行超时 ({timeout}s)"
+    except WebSocketDisconnect:
+        _cleanup_node(ws)
+        return f"[ERROR] 节点 '{node_name}' 连接已断开，请在客户端重新连接"
+    except Exception as e:
+        return f"[ERROR] 与节点 '{node_name}' 通信失败: {e}"
+
+
+def _cleanup_node(websocket):
+    """清理断开连接的节点，持久化离线状态。"""
+    for username in list(node_registry.keys()):
+        for node_name, data in list(node_registry.get(username, {}).items()):
+            if data.get("ws") is websocket:
+                del node_registry[username][node_name]
+                _persist_node_offline(username, node_name)
+                print(f"[NODE] - {username}@{node_name} 已断开 (剩余节点: {list(node_registry.get(username, {}).keys())})")
+                if not node_registry[username]:
+                    del node_registry[username]
+                return
 
 # 云端模式下禁用的工具模块
 CLOUD_BLOCKED_TOOLS = set()
@@ -235,6 +394,13 @@ class Session:
                     "10. 用 task_tree 查看项目的完整层级树。\n"
                     "11. 删除父任务会级联删除所有子任务，请先确认。\n"
                     "12. 项目概要面板左侧 activity bar 第二个图标，前端已支持树形折叠展示。\n"
+                    "\n"
+                    "=== 客户端节点工具（操作本地电脑）===\n"
+                    "13. 带双下划线 '__' 的工具来自客户端节点（如 DESKTOP-PC__run_shell）。\n"
+                    "    设备名称每次登录可能不同，使用前先浏览可用工具列表确认节点名称，不要凭空猜测。\n"
+                    "14. 每次收到消息后，先查看系统提示中「已连接的客户端节点」了解当前有哪些设备在线。\n"
+                    "15. 调用格式：<设备名>__<工具名>（双下划线分隔），如 DESKTOP-PC__read_file。\n"
+                    "16. 调用客户端工具可能较慢（需要网络往返），耐心等待结果，不要因超时重复调用。\n"
                 ),
             },
         ]
@@ -397,8 +563,8 @@ async def api_me(username: str = Depends(get_current_user)):
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest, username: str = Depends(get_current_user)):
-    """同步端点：发消息给 Agent。所有阻塞调用（subprocess/requests/OpenAI SDK）均在线程池执行，不会冻结事件循环。"""
+async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
+    """发送消息给 Agent。支持本地工具和远程客户端节点工具。"""
     try:
         user_id = username
         session = get_or_create_session(user_id, req.session_id)
@@ -412,6 +578,10 @@ def chat(req: ChatRequest, username: str = Depends(get_current_user)):
         user_tools_schemas, user_tools_funcs = user_tools.load_user_tools_for_agent(user_id)
         combined_tools = tools + user_tools_schemas
         combined_func_map = {**func_map, **user_tools_funcs}
+
+        # 合并客户端节点工具（每轮动态获取，支持节点热插拔）
+        client_schemas = _get_client_tool_schemas(user_id)
+        all_tools = combined_tools + client_schemas
 
         session.messages.append({"role": "user", "content": req.message})
 
@@ -433,10 +603,21 @@ def chat(req: ChatRequest, username: str = Depends(get_current_user)):
             user_client = _get_user_client(user_id)
             user_model = _get_user_model(user_id)
 
-            response = user_client.chat.completions.create(
+            # 动态注入节点上下文到 system prompt（不持久化到 session）
+            node_ctx = _get_node_context(user_id)
+            base_system = session.messages[0]["content"]
+            # 移除旧的节点上下文（如果有）
+            if "=== 已连接的客户端节点 ===" in base_system:
+                base_system = base_system.split("=== 已连接的客户端节点 ===")[0].rstrip()
+            call_system = base_system + node_ctx
+            call_messages = [{"role": "system", "content": call_system}] + session.messages[1:]
+
+            # 调用 AI（OpenAI SDK 是同步阻塞的，放入线程池避免卡住事件循环）
+            response = await asyncio.to_thread(
+                user_client.chat.completions.create,
                 model=user_model,
-                messages=session.messages,
-                tools=combined_tools,
+                messages=call_messages,
+                tools=all_tools,
                 tool_choice="auto",
                 extra_body={"thinking": {"type": "disabled"}},
             )
@@ -473,22 +654,28 @@ def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                 user_tools.set_current_user(user_id)
 
                 print(f"[TOOL CALL] {name}({json.dumps(args, ensure_ascii=False)})")
-                tool_func = combined_func_map.get(name)
-                if tool_func:
-                    try:
-                        result = tool_func(**args)
-                    except Exception as e:
-                        # 像 subprocess 一样：工具执行失败也返回错误信息给 AI，
-                        # AI 可以根据错误调整策略，而不是整个对话崩溃
-                        error_detail = traceback.format_exc()
-                        print(f"[TOOL ERROR] {name}: {error_detail[:300]}")
-                        result = (
-                            f"[TOOL ERROR] {type(e).__name__}: {e}\n\n"
-                            f"Hint: The tool call failed. Analyze the error and try a different approach. "
-                            f"Check your parameter types and values — are they correct for this function?"
-                        )
+
+                # ---- 工具路由：节点工具 vs 本地工具 ----
+                if "__" in name and name.split("__", 1)[0] in node_registry.get(user_id, {}):
+                    # 客户端节点工具（格式: <节点名>__<工具名>，双下划线分隔）
+                    node_name, original_name = name.split("__", 1)
+                    result = await _call_node_tool(user_id, node_name, original_name, args)
                 else:
-                    result = f"[ERROR] Unknown tool: {name}. Available: {', '.join(sorted(combined_func_map.keys()))}"
+                    # 本地工具
+                    tool_func = combined_func_map.get(name)
+                    if tool_func:
+                        try:
+                            result = await asyncio.to_thread(tool_func, **args)
+                        except Exception as e:
+                            error_detail = traceback.format_exc()
+                            print(f"[TOOL ERROR] {name}: {error_detail[:300]}")
+                            result = (
+                                f"[TOOL ERROR] {type(e).__name__}: {e}\n\n"
+                                f"Hint: The tool call failed. Analyze the error and try a different approach. "
+                                f"Check your parameter types and values — are they correct for this function?"
+                            )
+                    else:
+                        result = f"[ERROR] Unknown tool: {name}. Available: {', '.join(sorted(combined_func_map.keys()))}"
                 print(f"[TOOL RESULT] {str(result)[:200]}")
 
                 tool_record = {
@@ -536,7 +723,6 @@ def chat(req: ChatRequest, username: str = Depends(get_current_user)):
         )
 
     except Exception as e:
-        import traceback
         err_msg = f"{type(e).__name__}: {str(e)}"
         print(f"[ERROR] chat: {err_msg}")
         print(traceback.format_exc())
@@ -878,6 +1064,135 @@ async def api_save_settings(req: SettingsRequest, username: str = Depends(get_cu
         }
 
     return {"status": "ok", "message": "设置已保存，连接验证通过 ✓"}
+
+
+# ============================================================
+#  Client Node API — 查询已连接/历史节点
+# ============================================================
+
+@app.get("/api/nodes")
+async def api_list_nodes(username: str = Depends(get_current_user)):
+    """返回当前用户的所有已知节点（在线/离线）及其工具。"""
+    stored = _load_nodes(username)
+    # 合并内存中的在线状态（优先级高于磁盘）
+    online_nodes = node_registry.get(username, {})
+    result = []
+    for node_name, node_data in stored.items():
+        if node_name in online_nodes:
+            node_data["online"] = True
+            node_data["interactive"] = online_nodes[node_name].get("interactive", True)
+            node_data["work_root"] = online_nodes[node_name].get("work_root", "")
+        else:
+            node_data["online"] = False
+        result.append({
+            "name": node_name,
+            "online": node_data["online"],
+            "tool_names": node_data.get("tool_names", []),
+            "interactive": node_data.get("interactive", True),
+            "work_root": node_data.get("work_root", ""),
+            "last_seen": node_data.get("last_seen", ""),
+        })
+    return {"nodes": result, "total": len(result)}
+
+
+# ============================================================
+#  Client Node WebSocket endpoint
+#  客户端节点通过此端点连接服务器，注册本地工具供 AI 调用
+# ============================================================
+
+@app.websocket("/ws")
+async def websocket_node_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    connected_user = None
+    connected_node = None
+
+    try:
+        # --- 握手阶段 1: 认证 ---
+        msg = await asyncio.wait_for(websocket.receive_json(), timeout=15)
+        if msg.get("type") != "auth":
+            await websocket.send_json({"type": "error", "message": "Expected auth message"})
+            return
+
+        token = msg.get("token", "")
+        if token.startswith("Bearer "):
+            token = token[7:]
+        result = verify_token(token)
+        if not result["valid"]:
+            await websocket.send_json({
+                "type": "auth_failed",
+                "message": result.get("message", "Invalid token"),
+            })
+            return
+
+        connected_user = result["username"]
+        await websocket.send_json({"type": "auth_ok", "username": connected_user})
+
+        # --- 握手阶段 2: 注册工具 ---
+        msg = await asyncio.wait_for(websocket.receive_json(), timeout=15)
+        if msg.get("type") != "tools_register":
+            await websocket.send_json({"type": "error", "message": "Expected tools_register"})
+            return
+
+        node_name = (msg.get("node_name") or "unknown").strip()
+        connected_node = node_name
+        tools_list = msg.get("tools", [])
+        work_root = msg.get("work_root", "")
+        interactive = msg.get("interactive", True)
+
+        # 注册节点（如果同名节点已存在，先关闭旧连接）
+        if connected_user not in node_registry:
+            node_registry[connected_user] = {}
+        old = node_registry[connected_user].get(node_name)
+        if old:
+            try:
+                await old["ws"].close()
+            except Exception:
+                pass
+
+        node_registry[connected_user][node_name] = {
+            "ws": websocket,
+            "lock": asyncio.Lock(),
+            "tools": tools_list,
+            "work_root": work_root,
+            "interactive": interactive,
+            "connected_at": time.time(),
+        }
+
+        # 持久化节点信息到磁盘
+        _persist_node_online(connected_user, node_name, tools_list,
+                             work_root, interactive)
+
+        tool_names = [t["function"]["name"] for t in tools_list]
+        print(f"[NODE] + {connected_user}@{node_name} "
+              f"({len(tool_names)} tools: {', '.join(tool_names)})")
+        await websocket.send_json({
+            "type": "tools_registered",
+            "node_name": node_name,
+            "tool_count": len(tool_names),
+        })
+
+        # --- 保持连接存活（通过 lock 保护 recv，防止与 _call_node_tool 并发）---
+        while True:
+            lock = node_registry.get(connected_user, {}).get(node_name, {}).get("lock")
+            if not lock:
+                break  # 节点已被清理
+            async with lock:
+                try:
+                    msg = await asyncio.wait_for(websocket.receive_json(), timeout=30)
+                    if msg.get("type") == "ping":
+                        await websocket.send_json({"type": "pong"})
+                except asyncio.TimeoutError:
+                    pass  # 心跳超时，继续循环
+
+    except asyncio.TimeoutError:
+        print(f"[NODE] Handshake timeout")
+    except WebSocketDisconnect:
+        if connected_user and connected_node:
+            print(f"[NODE] - {connected_user}@{connected_node} 连接断开")
+    except Exception as e:
+        print(f"[NODE] WebSocket 错误 ({connected_user}@{connected_node}): {e}")
+
+    _cleanup_node(websocket)
 
 
 # ============================================================
