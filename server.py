@@ -43,11 +43,61 @@ from tools import scheduler as task_scheduler
 # ============================================================
 #  配置
 # ============================================================
-API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-c50656ead7034c9f9f72fa94323b0d46")
-BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
+# 服务器全局默认值（仅当用户未设置自己的 API 配置时使用）
+DEFAULT_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+DEFAULT_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+DEFAULT_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 HOST = os.environ.get("SERVER_HOST", "0.0.0.0")
 PORT = int(os.environ.get("SERVER_PORT", "8010"))
+
+# 用户设置存储目录
+SETTINGS_DIR = os.path.join(os.path.dirname(__file__) or ".", "data", "settings")
+os.makedirs(SETTINGS_DIR, exist_ok=True)
+
+
+def _get_user_settings_path(username: str) -> str:
+    """获取用户设置 JSON 文件路径"""
+    safe_name = username.replace("/", "_").replace("\\", "_")
+    return os.path.join(SETTINGS_DIR, f"{safe_name}.json")
+
+
+def _load_user_settings(username: str) -> dict:
+    """加载用户 API 设置"""
+    path = _get_user_settings_path(username)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {}
+    return {}
+
+
+def _save_user_settings(username: str, settings: dict):
+    """保存用户 API 设置"""
+    path = _get_user_settings_path(username)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+
+
+def _get_user_client(username: str) -> OpenAI:
+    """根据用户设置创建 OpenAI 客户端（若用户未设置则回退到全局默认）"""
+    settings = _load_user_settings(username)
+    api_key = settings.get("api_key") or DEFAULT_API_KEY
+    base_url = settings.get("base_url") or DEFAULT_BASE_URL
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="未配置 API Key。请点击左下角⚙️设置图标，填入你的 API Key。\n"
+                   "支持所有 OpenAI 兼容的服务商（DeepSeek / Ollama / vLLM / Groq 等）。",
+        )
+    return OpenAI(api_key=api_key, base_url=base_url)
+
+
+def _get_user_model(username: str) -> str:
+    """获取用户设置的模型名"""
+    settings = _load_user_settings(username)
+    return settings.get("model") or DEFAULT_MODEL
 
 # 云端模式下禁用的工具模块
 CLOUD_BLOCKED_TOOLS = set()
@@ -100,7 +150,8 @@ def _delete_session_from_disk(username: str, session_id: str):
         del all_sessions[session_id]
         _save_user_sessions_to_disk(username, all_sessions)
 
-client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+# 注意：不再使用全局 client。每个请求根据用户设置创建。
+# 这样做是为了多用户隔离 —— 每人可以用自己的 API Key 和 Base URL。
 
 # ============================================================
 #  模块加载器（云端版，自动过滤不安全工具）
@@ -378,8 +429,12 @@ def chat(req: ChatRequest, username: str = Depends(get_current_user)):
         while round_count < max_rounds:
             round_count += 1
 
-            response = client.chat.completions.create(
-                model=MODEL,
+            # 每次循环前获取用户专属 client（支持热切换 API Key）
+            user_client = _get_user_client(user_id)
+            user_model = _get_user_model(user_id)
+
+            response = user_client.chat.completions.create(
+                model=user_model,
                 messages=session.messages,
                 tools=combined_tools,
                 tool_choice="auto",
@@ -769,6 +824,63 @@ async def api_remove_scheduled_task(task_name: str, username: str = Depends(get_
 
 
 # ============================================================
+#  User API settings（每个用户可配置自己的 API Key / Base URL / Model）
+# ============================================================
+
+@app.get("/api/settings")
+async def api_get_settings(username: str = Depends(get_current_user)):
+    """获取当前用户的 API 配置（api_key 仅返回后4位掩码）"""
+    settings = _load_user_settings(username)
+    masked_key = ""
+    raw_key = settings.get("api_key", "")
+    if raw_key and len(raw_key) > 4:
+        masked_key = "*" * (len(raw_key) - 4) + raw_key[-4:]
+    return {
+        "api_key": masked_key,
+        "base_url": settings.get("base_url") or DEFAULT_BASE_URL,
+        "model": settings.get("model") or DEFAULT_MODEL,
+        "has_api_key": bool(raw_key),
+    }
+
+
+class SettingsRequest(BaseModel):
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+
+
+@app.put("/api/settings")
+async def api_save_settings(req: SettingsRequest, username: str = Depends(get_current_user)):
+    """保存当前用户的 API 配置"""
+    settings = _load_user_settings(username)
+    if req.api_key is not None:
+        settings["api_key"] = req.api_key
+    if req.base_url is not None:
+        settings["base_url"] = req.base_url
+    if req.model is not None:
+        settings["model"] = req.model
+    _save_user_settings(username, settings)
+
+    # 验证配置是否可用
+    try:
+        test_client = OpenAI(
+            api_key=settings.get("api_key") or DEFAULT_API_KEY,
+            base_url=settings.get("base_url") or DEFAULT_BASE_URL,
+            timeout=5.0,
+        )
+        test_client.models.list()
+    except Exception as e:
+        err_msg = str(e)
+        # 不阻断保存，只是提醒用户
+        return {
+            "status": "saved_with_warning",
+            "message": f"设置已保存，但测试连接失败: {err_msg}\n请检查 API Key 和 Base URL 是否正确。",
+        }
+
+    return {"status": "ok", "message": "设置已保存，连接验证通过 ✓"}
+
+
+# ============================================================
 #  Entry point
 # ============================================================
 if __name__ == "__main__":
@@ -778,7 +890,9 @@ if __name__ == "__main__":
     print("=" * 55)
     print(f"  Web UI:   {local_url}")
     print(f"  API Docs: {local_url}/docs")
-    print(f"  AI Model: {MODEL}")
+    print(f"  Model:    {DEFAULT_MODEL}")
+    print(f"  API URL:  {DEFAULT_BASE_URL}")
+    print(f"  API Key:  {'✔ 全局默认已配置' if DEFAULT_API_KEY else '⚠ 需用户在设置中配置'}")
     print(f"  Tools:    {len(tools)} loaded")
     print(f"  Blocked:  {', '.join(CLOUD_BLOCKED_TOOLS) if CLOUD_BLOCKED_TOOLS else '(none)'}")
     print("=" * 55)
