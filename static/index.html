@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZeroAgent - 登录</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Microsoft YaHei", sans-serif;
+    background: linear-gradient(135deg, #0f1117 0%, #1a1d2e 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .auth-container {
+    background: #1a1d2e;
+    border: 1px solid #333;
+    border-radius: 16px;
+    padding: 40px;
+    width: 420px;
+    max-width: 90vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .logo {
+    text-align: center;
+    margin-bottom: 30px;
+  }
+  .logo h1 {
+    font-size: 28px;
+    font-weight: 700;
+    background: linear-gradient(90deg, #6c5ce7, #a29bfe);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .logo p {
+    color: #888;
+    margin-top: 8px;
+    font-size: 14px;
+  }
+  .tabs {
+    display: flex;
+    margin-bottom: 25px;
+    border-bottom: 1px solid #333;
+  }
+  .tab {
+    flex: 1;
+    text-align: center;
+    padding: 12px;
+    cursor: pointer;
+    color: #888;
+    font-weight: 500;
+    transition: all 0.3s;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .tab.active {
+    color: #a29bfe;
+    border-bottom-color: #6c5ce7;
+  }
+  .form-group {
+    margin-bottom: 18px;
+  }
+  .form-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 500;
+    color: #aaa;
+    font-size: 14px;
+  }
+  .form-group input {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid #333;
+    border-radius: 8px;
+    font-size: 15px;
+    transition: border-color 0.3s;
+    outline: none;
+    background: #0f1117;
+    color: #e0e0e0;
+  }
+  .form-group input:focus {
+    border-color: #6c5ce7;
+  }
+  .form-group input::placeholder { color: #555; }
+  .btn {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+    margin-top: 5px;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, #6c5ce7, #a29bfe);
+    color: white;
+  }
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(108, 92, 231, 0.4);
+  }
+  .error {
+    background: #2a1a1a;
+    color: #ff6b6b;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 15px;
+    border: 1px solid #4a2a2a;
+  }
+  .success {
+    background: #1a2a1a;
+    color: #4ade80;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 15px;
+    border: 1px solid #2a4a2a;
+  }
+  .form-footer {
+    text-align: center;
+    margin-top: 20px;
+    color: #888;
+    font-size: 13px;
+  }
+  .form-footer a {
+    color: #a29bfe;
+    text-decoration: none;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .form-footer a:hover { text-decoration: underline; }
+  .hidden { display: none; }
+  .loading {
+    text-align: center;
+    color: #888;
+    font-size: 13px;
+    padding: 10px;
+  }
+</style>
+</head>
+<body>
+<div class="auth-container">
+  <div class="logo">
+    <h1>ZeroAgent</h1>
+    <p>云端智能助手 · 多用户隔离 · 项目管理</p>
+  </div>
+
+  <div id="errorMsg" class="error hidden"></div>
+  <div id="successMsg" class="success hidden"></div>
+
+  <div class="tabs">
+    <div class="tab active" id="loginTab" onclick="switchTab('login')">登录</div>
+    <div class="tab" id="registerTab" onclick="switchTab('register')">注册</div>
+  </div>
+
+  <!-- 登录表单 -->
+  <div id="loginForm">
+    <div class="form-group">
+      <label for="loginUsername">用户名</label>
+      <input type="text" id="loginUsername" placeholder="请输入用户名" autocomplete="username">
+    </div>
+    <div class="form-group">
+      <label for="loginPassword">密码</label>
+      <input type="password" id="loginPassword" placeholder="请输入密码" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" onclick="handleLogin()">登 录</button>
+    <div class="form-footer">
+      还没有账号？<a onclick="switchTab('register')">立即注册</a>
+    </div>
+  </div>
+
+  <!-- 注册表单 -->
+  <div id="registerForm" class="hidden">
+    <div class="form-group">
+      <label for="regUsername">用户名</label>
+      <input type="text" id="regUsername" placeholder="2-30个字符">
+    </div>
+    <div class="form-group">
+      <label for="regPassword">密码</label>
+      <input type="password" id="regPassword" placeholder="至少6位密码">
+    </div>
+    <div class="form-group">
+      <label for="regConfirm">确认密码</label>
+      <input type="password" id="regConfirm" placeholder="再次输入密码">
+    </div>
+    <button class="btn btn-primary" onclick="handleRegister()">注 册</button>
+    <div class="form-footer">
+      已有账号？<a onclick="switchTab('login')">返回登录</a>
+    </div>
+  </div>
+</div>
+
+<script>
+const SERVER_URL = window.location.origin;
+
+function showError(msg) {
+  const el = document.getElementById('errorMsg');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  document.getElementById('successMsg').classList.add('hidden');
+}
+
+function showSuccess(msg) {
+  const el = document.getElementById('successMsg');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  document.getElementById('errorMsg').classList.add('hidden');
+}
+
+function hideMessages() {
+  document.getElementById('errorMsg').classList.add('hidden');
+  document.getElementById('successMsg').classList.add('hidden');
+}
+
+function switchTab(tab) {
+  hideMessages();
+  const loginForm = document.getElementById('loginForm');
+  const registerForm = document.getElementById('registerForm');
+  const loginTab = document.getElementById('loginTab');
+  const registerTab = document.getElementById('registerTab');
+
+  if (tab === 'login') {
+    loginForm.classList.remove('hidden');
+    registerForm.classList.add('hidden');
+    loginTab.classList.add('active');
+    registerTab.classList.remove('active');
+  } else {
+    loginForm.classList.add('hidden');
+    registerForm.classList.remove('hidden');
+    loginTab.classList.remove('active');
+    registerTab.classList.add('active');
+  }
+}
+
+// 回车触发
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    if (!loginForm.classList.contains('hidden')) {
+      handleLogin();
+    } else if (!registerForm.classList.contains('hidden')) {
+      handleRegister();
+    }
+  }
+});
+
+async function handleLogin() {
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value;
+
+  if (!username || !password) {
+    showError('用户名和密码不能为空');
+    return;
+  }
+
+  try {
+    const res = await fetch(SERVER_URL + '/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      showError(data.detail || '登录失败');
+      return;
+    }
+
+    const data = await res.json();
+    // 保存 token 和用户名到 localStorage
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('username', data.username);
+    // 跳转到主界面
+    window.location.href = '/static/chat.html';
+  } catch (err) {
+    showError('网络错误: ' + err.message);
+  }
+}
+
+async function handleRegister() {
+  const username = document.getElementById('regUsername').value.trim();
+  const password = document.getElementById('regPassword').value;
+  const confirm = document.getElementById('regConfirm').value;
+
+  if (!username || !password) {
+    showError('用户名和密码不能为空');
+    return;
+  }
+
+  if (password !== confirm) {
+    showError('两次输入的密码不一致');
+    return;
+  }
+
+  if (password.length < 6) {
+    showError('密码长度至少6位');
+    return;
+  }
+
+  try {
+    const res = await fetch(SERVER_URL + '/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      showError(data.detail || '注册失败');
+      return;
+    }
+
+    const data = await res.json();
+    showSuccess(data.message + '，正在跳转到登录...');
+
+    // 自动切换到登录并填充用户名
+    setTimeout(() => {
+      switchTab('login');
+      document.getElementById('loginUsername').value = username;
+      document.getElementById('loginPassword').value = '';
+      document.getElementById('loginPassword').focus();
+    }, 1500);
+  } catch (err) {
+    showError('网络错误: ' + err.message);
+  }
+}
+
+// 检查是否已登录（有 token），已登录则直接跳转
+(function() {
+  const token = localStorage.getItem('token');
+  if (token) {
+    // 验证 token 是否有效
+    fetch(SERVER_URL + '/api/verify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      }
+    })
+    .then(r => {
+      if (r.ok) {
+        window.location.href = '/static/chat.html';
+      } else {
+        localStorage.removeItem('token');
+        localStorage.removeItem('username');
+      }
+    })
+    .catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>

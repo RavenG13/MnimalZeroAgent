@@ -1,0 +1,7 @@
+[
+  {
+    "name": "hello_world",
+    "description": "输出问候语，参数为 name（可选，默认 World），返回 Hello, {name}! 的问候信息",
+    "file": "hello_world.py"
+  }
+]

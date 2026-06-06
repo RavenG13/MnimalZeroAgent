@@ -1,0 +1,17 @@
+[
+  {
+    "id": "780673346665",
+    "username": "test_user",
+    "name": "morning_task",
+    "cron_expr": "08:00",
+    "action_type": "custom_message",
+    "action_params": {
+      "message": "早上好!"
+    },
+    "description": "早安提醒",
+    "enabled": true,
+    "created_at": "2026-06-05T23:29:06.665885",
+    "last_run": null,
+    "next_run": "2026-06-06T08:00:00"
+  }
+]
