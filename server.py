@@ -356,8 +356,45 @@ def discover_modules():
     return tools_list, func_map
 
 tools, func_map = discover_modules()
-print(f"[CLOUD] Loaded {len(tools)} safe tools")
 
+# ---- 内置工具：列出已连接的客户端设备 ----
+# 注意：此函数由 /chat 工具路由直接调用（不经过 asyncio.to_thread），
+# 因此 thread-local 上下文可以正常传递。
+def list_connected_devices(_username: str = None) -> str:
+    """
+    列出当前用户已连接到服务器的客户端设备及其可用工具。
+    参数 _username 由 /chat 端点自动注入（不需要 AI 传入）。
+    """
+    from tools import project_tools as _pt
+    username = _username or _pt.get_current_user()
+    nodes = node_registry.get(username, {})
+    if not nodes:
+        return "当前没有设备在线。请在电脑上运行 client.py 连接。\n格式: python client.py --server <服务器地址>"
+    lines = [f"已连接的设备 ({len(nodes)} 台):", ""]
+    for node_name, nd in nodes.items():
+        tool_names = [t["function"]["name"] for t in nd.get("tools", [])]
+        lines.append(f"  [{node_name}]")
+        lines.append(f"    模式: {'需确认' if nd.get('interactive', True) else '自动执行'}")
+        if nd.get("work_root"):
+            lines.append(f"    工作目录: {nd['work_root']}")
+        lines.append(f"    工具: {', '.join(tool_names)}")
+        lines.append("")
+    # 追加调用说明
+    lines.append("调用格式: <设备名>__<工具名>(参数)")
+    lines.append("示例: ACER-BLUE__get_system_info()")
+    return "\n".join(lines)
+
+tools.append({
+    "type": "function",
+    "function": {
+        "name": "list_connected_devices",
+        "description": "查看当前有哪些客户端电脑连接到了AI大脑。返回在线设备名称、工具列表和调用格式。在操作客户端电脑之前先调用此工具了解设备名。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+})
+func_map["list_connected_devices"] = list_connected_devices
+
+print(f"[CLOUD] Loaded {len(tools)} safe tools (含 list_connected_devices)")
 
 # ---- 工具调度器 ----
 def execute_tool(name: str, args: dict) -> str:
@@ -396,11 +433,10 @@ class Session:
                     "12. 项目概要面板左侧 activity bar 第二个图标，前端已支持树形折叠展示。\n"
                     "\n"
                     "=== 客户端节点工具（操作本地电脑）===\n"
-                    "13. 带双下划线 '__' 的工具来自客户端节点（如 DESKTOP-PC__run_shell）。\n"
-                    "    设备名称每次登录可能不同，使用前先浏览可用工具列表确认节点名称，不要凭空猜测。\n"
-                    "14. 每次收到消息后，先查看系统提示中「已连接的客户端节点」了解当前有哪些设备在线。\n"
-                    "15. 调用格式：<设备名>__<工具名>（双下划线分隔），如 DESKTOP-PC__read_file。\n"
-                    "16. 调用客户端工具可能较慢（需要网络往返），耐心等待结果，不要因超时重复调用。\n"
+                    "13. 操作用户本地电脑前，必须先调用 list_connected_devices 查看有哪些设备在线、设备名是什么。\n"
+                    "14. 调用格式：<设备名>__<工具名>（双下划线分隔），如 DESKTOP-PC__read_file。\n"
+                    "    设备名称由用户登录时设定，每次可能不同，不要猜测名称。\n"
+                    "15. 调用客户端工具可能较慢（需要网络往返），耐心等待结果。\n"
                 ),
             },
         ]
@@ -579,10 +615,6 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
         combined_tools = tools + user_tools_schemas
         combined_func_map = {**func_map, **user_tools_funcs}
 
-        # 合并客户端节点工具（每轮动态获取，支持节点热插拔）
-        client_schemas = _get_client_tool_schemas(user_id)
-        all_tools = combined_tools + client_schemas
-
         session.messages.append({"role": "user", "content": req.message})
 
         user_msg_count = sum(1 for m in session.messages if m["role"] == "user")
@@ -603,14 +635,16 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
             user_client = _get_user_client(user_id)
             user_model = _get_user_model(user_id)
 
-            # 动态注入节点上下文到 system prompt（不持久化到 session）
-            node_ctx = _get_node_context(user_id)
-            base_system = session.messages[0]["content"]
-            # 移除旧的节点上下文（如果有）
-            if "=== 已连接的客户端节点 ===" in base_system:
-                base_system = base_system.split("=== 已连接的客户端节点 ===")[0].rstrip()
-            call_system = base_system + node_ctx
-            call_messages = [{"role": "system", "content": call_system}] + session.messages[1:]
+            # 每轮刷新：客户端节点工具 schema（支持热插拔）
+            client_schemas = _get_client_tool_schemas(user_id)
+            all_tools = combined_tools + client_schemas
+
+            # Debug: 打印每轮传给 AI 的工具列表
+            client_tool_names = [t["function"]["name"] for t in client_schemas]
+            print(f"[AI ROUND {round_count}] server_tools:{len(combined_tools)} "
+                  f"node_tools:{len(client_schemas)}"
+                  + (f" ({', '.join(client_tool_names)})" if client_schemas else " (无客户端节点在线)"))
+            call_messages = session.messages
 
             # 调用 AI（OpenAI SDK 是同步阻塞的，放入线程池避免卡住事件循环）
             response = await asyncio.to_thread(
@@ -660,6 +694,13 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                     # 客户端节点工具（格式: <节点名>__<工具名>，双下划线分隔）
                     node_name, original_name = name.split("__", 1)
                     result = await _call_node_tool(user_id, node_name, original_name, args)
+                elif name == "list_connected_devices":
+                    # 内置工具：纯内存查表，同步执行即可（不通过 asyncio.to_thread，
+                    # 避免线程切换导致 threading.local 丢失）
+                    try:
+                        result = list_connected_devices(_username=user_id)
+                    except Exception as e:
+                        result = f"[TOOL ERROR] {type(e).__name__}: {e}"
                 else:
                     # 本地工具
                     tool_func = combined_func_map.get(name)
