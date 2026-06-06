@@ -1,0 +1,16 @@
+version: "3.8"
+
+services:
+  zeroagent:
+    build: .
+    container_name: zeroagent
+    ports:
+      - "8010:8010"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8010
+      - JWT_SECRET=change-this-to-a-random-string
+    volumes:
+      - ./data:/app/data   # 持久化用户数据
+    restart: unless-stopped

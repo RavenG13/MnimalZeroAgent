@@ -18,7 +18,7 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Form, WebSocket
+from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Form, WebSocket, Request
 from starlette.websockets import WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -85,18 +85,18 @@ def _save_user_settings(username: str, settings: dict):
         json.dump(settings, f, ensure_ascii=False, indent=2)
 
 
-def _get_user_client(username: str) -> OpenAI:
-    """根据用户设置创建 OpenAI 客户端（若用户未设置则回退到全局默认）"""
+def _get_user_client(username: str):
+    """根据用户设置创建 OpenAI 客户端。返回 (client, error_msg)。"""
     settings = _load_user_settings(username)
     api_key = settings.get("api_key") or DEFAULT_API_KEY
     base_url = settings.get("base_url") or DEFAULT_BASE_URL
     if not api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="未配置 API Key。请点击左下角⚙️设置图标，填入你的 API Key。\n"
-                   "支持所有 OpenAI 兼容的服务商（DeepSeek / Ollama / vLLM / Groq 等）。",
+        return None, (
+            "⚠️ 未配置 API Key，我无法调用 AI 模型。\n\n"
+            "请点击左下角 ⚙️ 齿轮图标，填入你的 API Key。\n"
+            "支持所有 OpenAI 兼容的服务商：DeepSeek / OpenAI / Ollama / vLLM / Groq 等。"
         )
-    return OpenAI(api_key=api_key, base_url=base_url)
+    return OpenAI(api_key=api_key, base_url=base_url), None
 
 
 def _get_user_model(username: str) -> str:
@@ -520,6 +520,27 @@ async def enforce_utf8_charset(request, call_next):
             response.headers["content-type"] = f"{ct}; charset=utf-8"
     return response
 
+
+# ============================================================
+#  全局异常处理：强制返回 JSON，防止 Starlette debug HTML 页面
+# ============================================================
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    # HTTPException 用 FastAPI 默认处理（也是 JSON）
+    if isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+        )
+    # 其他所有未捕获异常也返回 JSON
+    import traceback as _tb
+    print(f"[500] {type(exc).__name__}: {exc}")
+    _tb.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"服务器内部错误: {type(exc).__name__}: {exc}"},
+    )
+
 static_dir = os.path.join(os.path.dirname(__file__) or ".", "static")
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
@@ -632,7 +653,13 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
             round_count += 1
 
             # 每次循环前获取用户专属 client（支持热切换 API Key）
-            user_client = _get_user_client(user_id)
+            user_client, client_err = _get_user_client(user_id)
+            if client_err:
+                return ChatResponse(
+                    reply=client_err,
+                    session_id=session.session_id,
+                    username=user_id,
+                )
             user_model = _get_user_model(user_id)
 
             # 每轮刷新：客户端节点工具 schema（支持热插拔）
