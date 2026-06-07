@@ -919,7 +919,8 @@ async function sendMessage() {
 
     // 刷新会话列表（显示最新的 last_message）
     await renderSessionList();
-    if (currentPanel === 'projects') refreshProjects();
+    // 始终刷新项目数据（AI 可能通过工具修改了项目/任务）
+    refreshProjects();
   } catch (err) {
     loadingDiv.textContent = '[错误] ' + err.message;
     console.error(err);

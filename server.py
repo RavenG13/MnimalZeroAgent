@@ -733,7 +733,18 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                     tool_func = combined_func_map.get(name)
                     if tool_func:
                         try:
-                            result = await asyncio.to_thread(tool_func, **args)
+                            # 使用闭包捕获 user_id，确保在 asyncio.to_thread
+                            # 创建的线程池线程中正确设置 threading.local 用户名。
+                            # 否则 project_tools / memory_tools / user_tools 的
+                            # get_current_user() 会回退到 "default"，导致数据
+                            # 写入错误的用户数据库。
+                            def _run_with_user(fn, username, **kw):
+                                ptools.set_current_user(username)
+                                from tools import memory_tools as _mt
+                                _mt.set_current_user(username)
+                                user_tools.set_current_user(username)
+                                return fn(**kw)
+                            result = await asyncio.to_thread(_run_with_user, tool_func, user_id, **args)
                         except Exception as e:
                             error_detail = traceback.format_exc()
                             print(f"[TOOL ERROR] {name}: {error_detail[:300]}")
