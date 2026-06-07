@@ -345,7 +345,52 @@
   .project-group .project-body .empty-hint {
     color: #444; text-align: center; padding: 8px; font-size: 11px;
   }
+  /* ---- Markdown 渲染样式 ---- */
+  .msg-content { line-height: 1.65; }
+  .msg-content h1, .msg-content h2, .msg-content h3, .msg-content h4 {
+    margin: 14px 0 6px; font-weight: 600; color: #c4b5fd;
+  }
+  .msg-content h1 { font-size: 1.3em; }
+  .msg-content h2 { font-size: 1.15em; border-bottom: 1px solid #2a2a3a; padding-bottom: 4px; }
+  .msg-content h3 { font-size: 1.05em; }
+  .msg-content p { margin: 4px 0; }
+  .msg-content ul, .msg-content ol { margin: 4px 0; padding-left: 20px; }
+  .msg-content li { margin: 2px 0; }
+  .msg-content a { color: #a29bfe; }
+  .msg-content blockquote {
+    border-left: 3px solid #6c5ce7; padding: 4px 12px; margin: 6px 0;
+    color: #999; background: rgba(108,92,231,0.05);
+  }
+  .msg-content pre {
+    background: #0d0f17; border: 1px solid #2a2a3a; border-radius: 8px;
+    padding: 12px 14px; overflow-x: auto; margin: 8px 0;
+    font-size: 13px; line-height: 1.5;
+  }
+  .msg-content pre code {
+    background: none; padding: 0; font-size: inherit;
+    font-family: 'Consolas', 'Courier New', 'Source Code Pro', monospace;
+  }
+  .msg-content code {
+    background: #1a1d2e; padding: 2px 6px; border-radius: 4px;
+    font-size: 0.9em; font-family: 'Consolas', 'Courier New', monospace;
+    color: #f0c060;
+  }
+  .msg-content table {
+    border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px;
+  }
+  .msg-content th, .msg-content td {
+    border: 1px solid #333; padding: 6px 10px; text-align: left;
+  }
+  .msg-content th { background: #1a1d2e; color: #a29bfe; font-weight: 600; }
+  .msg-content td { background: #11131f; }
+  .msg-content tr:hover td { background: #181c2a; }
+  .msg-content hr { border: none; border-top: 1px solid #2a2a3a; margin: 12px 0; }
+  .msg-content strong { color: #e8e8e8; font-weight: 600; }
+  .msg-content img { max-width: 100%; border-radius: 6px; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/atom-one-dark.min.css">
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/highlight.min.js"></script>
 </head>
 <body>
 
@@ -710,7 +755,15 @@ function addMessageToUI(role, content, toolCalls) {
   const container = document.getElementById('messages');
   const div = document.createElement('div');
   div.className = 'message ' + role;
-  div.textContent = content;
+  // 消息内容包裹在 .msg-content 中，assistant 消息渲染 markdown
+  const contentDiv = document.createElement('div');
+  contentDiv.className = 'msg-content';
+  if (role === 'user') {
+    contentDiv.textContent = content;
+  } else {
+    contentDiv.innerHTML = renderMarkdown(content);
+  }
+  div.appendChild(contentDiv);
   const ts = document.createElement('div');
   ts.className = 'timestamp';
   ts.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
@@ -880,8 +933,12 @@ async function sendMessage() {
       setActiveSessionId(data.session_id);
     }
 
-    loadingDiv.textContent = data.reply;
-
+    // 渲染 markdown 到 .msg-content，替换"思考中..."
+    const msgContent = loadingDiv.querySelector('.msg-content');
+    if (msgContent) msgContent.innerHTML = renderMarkdown(data.reply);
+    // 更新已存在的时间戳，而非追加新的
+    const oldTs = loadingDiv.querySelector('.timestamp');
+    if (oldTs) oldTs.remove();
     const ts = document.createElement('div');
     ts.className = 'timestamp';
     ts.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
@@ -932,7 +989,9 @@ async function sendMessage() {
     // 始终刷新项目数据（AI 可能通过工具修改了项目/任务）
     refreshProjects();
   } catch (err) {
-    loadingDiv.textContent = '[错误] ' + err.message;
+    const mc = loadingDiv.querySelector('.msg-content');
+    if (mc) mc.innerHTML = renderMarkdown('**[错误]** ' + err.message);
+    else loadingDiv.textContent = '[错误] ' + err.message;
     console.error(err);
   }
 }
@@ -1103,6 +1162,44 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+// ========== Markdown 渲染（marked + highlight.js）==========
+(function() {
+  if (typeof marked !== 'undefined') {
+    marked.setOptions({
+      breaks: true,
+      gfm: true,
+    });
+    // 配置 highlight.js 代码语法高亮
+    const renderer = new marked.Renderer();
+    const origCode = renderer.code.bind(renderer);
+    renderer.code = function(code, language) {
+      if (language && typeof hljs !== 'undefined') {
+        try {
+          const validLang = hljs.getLanguage(language);
+          if (validLang) {
+            code = hljs.highlight(code, { language }).value;
+          }
+        } catch(e) {}
+      }
+      return origCode(code, language);
+    };
+    marked.setOptions({ renderer });
+  }
+})();
+
+function renderMarkdown(text) {
+  if (!text) return '';
+  try {
+    if (typeof marked !== 'undefined') {
+      return marked.parse(text);
+    }
+  } catch(e) {
+    console.error('Markdown parse error:', e);
+  }
+  // 降级：纯文本转义
+  return escapeHtml(text).replace(/\n/g, '<br>');
 }
 
 // ========== CSV导入 ==========
