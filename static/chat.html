@@ -94,9 +94,19 @@
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
+    min-height: 0;
     overflow: hidden;
     transition: width 0.2s;
   }
+  /* 会话面板和项目面板必须约束高度，否则会撑破整个侧栏 */
+  #panelSessions, #panelProjects {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  #panelSessions { flex: 1; }
+  #panelProjects { flex: 1; }
   .side-panel.collapsed { width: 0; border-right: none; }
   .panel-header {
     padding: 12px 14px 8px;
