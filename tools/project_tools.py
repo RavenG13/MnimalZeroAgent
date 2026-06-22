@@ -463,16 +463,18 @@ def _get_or_create_project(name: str) -> int:
 def project_list_all(status: str = None) -> str:
     """列出所有项目"""
     conn = _get_conn()
-    if status:
-        rows = conn.execute(
-            "SELECT * FROM projects WHERE status = ? ORDER BY updated_at DESC",
-            (status,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM projects ORDER BY CASE status WHEN '推进中' THEN 1 WHEN '待启动' THEN 2 WHEN '已完成' THEN 3 ELSE 4 END, updated_at DESC"
-        ).fetchall()
-    conn.close()
+    try:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM projects WHERE status = ? ORDER BY updated_at DESC",
+                (status,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM projects ORDER BY CASE status WHEN '推进中' THEN 1 WHEN '待启动' THEN 2 WHEN '已完成' THEN 3 ELSE 4 END, updated_at DESC"
+            ).fetchall()
+    finally:
+        conn.close()
 
     if not rows:
         return "[空] 暂无项目记录"
@@ -495,102 +497,105 @@ def project_list_all(status: str = None) -> str:
 def project_add(name: str, description: str = "", leader: str = "", deadline: str = "", goal: str = "", status: str = "待启动", progress: float = None) -> str:
     """新增项目"""
     conn = _get_conn()
-    existing = conn.execute("SELECT id FROM projects WHERE name = ?", (name,)).fetchone()
-    if existing:
+    try:
+        existing = conn.execute("SELECT id FROM projects WHERE name = ?", (name,)).fetchone()
+        if existing:
+            return f"[失败] 项目 '{name}' 已存在，请使用 project_update 更新或换一个名称"
+        if progress is not None:
+            conn.execute(
+                "INSERT INTO projects (name, description, leader, deadline, goal, status, progress) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (name, description, leader, deadline, goal, status, progress),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO projects (name, description, leader, deadline, goal, status) VALUES (?, ?, ?, ?, ?, ?)",
+                (name, description, leader, deadline, goal, status),
+            )
+        conn.commit()
+        return f"[成功] 项目 '{name}' 已创建 (状态: {status})"
+    finally:
         conn.close()
-        return f"[失败] 项目 '{name}' 已存在，请使用 project_update 更新或换一个名称"
-    if progress is not None:
-        conn.execute(
-            "INSERT INTO projects (name, description, leader, deadline, goal, status, progress) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (name, description, leader, deadline, goal, status, progress),
-        )
-    else:
-        conn.execute(
-            "INSERT INTO projects (name, description, leader, deadline, goal, status) VALUES (?, ?, ?, ?, ?, ?)",
-            (name, description, leader, deadline, goal, status),
-        )
-    conn.commit()
-    conn.close()
-    return f"[成功] 项目 '{name}' 已创建 (状态: {status})"
 
 
 def project_update(name: str, new_name: str = None, description: str = None, status: str = None, progress: float = None, deadline: str = None, goal: str = None, progress_note: str = None) -> str:
     """更新项目"""
     conn = _get_conn()
-    row = conn.execute("SELECT * FROM projects WHERE name = ?", (name,)).fetchone()
-    if not row:
+    try:
+        row = conn.execute("SELECT * FROM projects WHERE name = ?", (name,)).fetchone()
+        if not row:
+            return f"[失败] 项目 '{name}' 不存在"
+
+        updates = []
+        params = []
+        if new_name is not None:
+            updates.append("name = ?")
+            params.append(new_name)
+        if description is not None:
+            updates.append("description = ?")
+            params.append(description)
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+        if progress is not None:
+            updates.append("progress = ?")
+            params.append(progress)
+        if deadline is not None:
+            updates.append("deadline = ?")
+            params.append(deadline)
+        if goal is not None:
+            updates.append("goal = ?")
+            params.append(goal)
+        if progress_note is not None:
+            # 追加进展说明，不覆盖
+            old_note = row["progress_note"] or ""
+            new_note = f"{old_note}; {progress_note}" if old_note else progress_note
+            updates.append("progress_note = ?")
+            params.append(new_note)
+
+        if not updates:
+            return "[提示] 没有要更新的字段"
+
+        updates.append("updated_at = datetime('now','localtime')")
+        params.append(name)
+        conn.execute(f"UPDATE projects SET {', '.join(updates)} WHERE name = ?", params)
+        conn.commit()
+        updated_fields = [k for k in ["new_name", "description", "status", "progress", "deadline", "goal", "progress_note"] if locals().get(k) is not None]
+        return f"[成功] 项目 '{name}' 已更新 ({', '.join(updated_fields)})"
+    finally:
         conn.close()
-        return f"[失败] 项目 '{name}' 不存在"
-
-    updates = []
-    params = []
-    if new_name is not None:
-        updates.append("name = ?")
-        params.append(new_name)
-    if description is not None:
-        updates.append("description = ?")
-        params.append(description)
-    if status is not None:
-        updates.append("status = ?")
-        params.append(status)
-    if progress is not None:
-        updates.append("progress = ?")
-        params.append(progress)
-    if deadline is not None:
-        updates.append("deadline = ?")
-        params.append(deadline)
-    if goal is not None:
-        updates.append("goal = ?")
-        params.append(goal)
-    if progress_note is not None:
-        # 追加进展说明，不覆盖
-        old_note = row["progress_note"] or ""
-        new_note = f"{old_note}; {progress_note}" if old_note else progress_note
-        updates.append("progress_note = ?")
-        params.append(new_note)
-
-    if not updates:
-        conn.close()
-        return "[提示] 没有要更新的字段"
-
-    updates.append("updated_at = datetime('now','localtime')")
-    params.append(name)
-    conn.execute(f"UPDATE projects SET {', '.join(updates)} WHERE name = ?", params)
-    conn.commit()
-    conn.close()
-    updated_fields = [k for k in ["new_name", "description", "status", "progress", "deadline", "goal", "progress_note"] if locals().get(k) is not None]
-    return f"[成功] 项目 '{name}' 已更新 ({', '.join(updated_fields)})"
 
 
 def project_delete(name: str) -> str:
     """删除项目及其任务"""
     conn = _get_conn()
-    row = conn.execute("SELECT id FROM projects WHERE name = ?", (name,)).fetchone()
-    if not row:
+    try:
+        row = conn.execute("SELECT id FROM projects WHERE name = ?", (name,)).fetchone()
+        if not row:
+            return f"[失败] 项目 '{name}' 不存在"
+        pid = row["id"]
+        # 删除关联任务
+        conn.execute("DELETE FROM tasks WHERE project_id = ?", (pid,))
+        conn.execute("DELETE FROM projects WHERE id = ?", (pid,))
+        conn.commit()
+        return f"[成功] 项目 '{name}' 及其所有任务已删除"
+    finally:
         conn.close()
-        return f"[失败] 项目 '{name}' 不存在"
-    pid = row["id"]
-    # 删除关联任务
-    conn.execute("DELETE FROM tasks WHERE project_id = ?", (pid,))
-    conn.execute("DELETE FROM projects WHERE id = ?", (pid,))
-    conn.commit()
-    conn.close()
-    return f"[成功] 项目 '{name}' 及其所有任务已删除"
 
 
 def task_tree(project_name: str) -> str:
     """查看项目的完整任务树形结构"""
     conn = _get_conn()
-    proj = conn.execute("SELECT id, name FROM projects WHERE name = ?", (project_name,)).fetchone()
-    if not proj:
-        conn.close()
-        return f"[失败] 项目 '{project_name}' 不存在"
+    try:
+        proj = conn.execute("SELECT id, name FROM projects WHERE name = ?", (project_name,)).fetchone()
+        if not proj:
+            return f"[失败] 项目 '{project_name}' 不存在"
 
-    rows = conn.execute(
-        "SELECT * FROM tasks WHERE project_id = ? ORDER BY priority DESC, created_at",
-        (proj["id"],),
-    ).fetchall()
-    conn.close()
+        rows = conn.execute(
+            "SELECT * FROM tasks WHERE project_id = ? ORDER BY priority DESC, created_at",
+            (proj["id"],),
+        ).fetchall()
+    finally:
+        conn.close()
 
     if not rows:
         return f"[空] 项目 '{project_name}' 暂无任务"
@@ -628,22 +633,23 @@ def task_tree(project_name: str) -> str:
 def task_list(project_name: str, status: str = None) -> str:
     """查看项目的任务（含层级缩进）"""
     conn = _get_conn()
-    proj = conn.execute("SELECT id, name FROM projects WHERE name = ?", (project_name,)).fetchone()
-    if not proj:
-        conn.close()
-        return f"[失败] 项目 '{project_name}' 不存在"
+    try:
+        proj = conn.execute("SELECT id, name FROM projects WHERE name = ?", (project_name,)).fetchone()
+        if not proj:
+            return f"[失败] 项目 '{project_name}' 不存在"
 
-    if status:
-        rows = conn.execute(
-            "SELECT * FROM tasks WHERE project_id = ? AND status = ? ORDER BY priority DESC, created_at",
-            (proj["id"], status),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM tasks WHERE project_id = ? ORDER BY CASE status WHEN '推进中' THEN 1 WHEN '待启动' THEN 2 WHEN '已完成' THEN 3 ELSE 4 END, priority DESC",
-            (proj["id"],),
-        ).fetchall()
-    conn.close()
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM tasks WHERE project_id = ? AND status = ? ORDER BY priority DESC, created_at",
+                (proj["id"], status),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM tasks WHERE project_id = ? ORDER BY CASE status WHEN '推进中' THEN 1 WHEN '待启动' THEN 2 WHEN '已完成' THEN 3 ELSE 4 END, priority DESC",
+                (proj["id"],),
+            ).fetchall()
+    finally:
+        conn.close()
 
     if not rows:
         return f"[空] 项目 '{project_name}' 暂无任务"
@@ -671,133 +677,135 @@ def task_add(project_name: str, task_name: str, parent_task: str = None, descrip
     """添加任务（支持多级层级）"""
     pid = _get_or_create_project(project_name)
     conn = _get_conn()
+    try:
+        existing = conn.execute("SELECT id FROM tasks WHERE project_id = ? AND name = ?", (pid, task_name)).fetchone()
+        if existing:
+            return f"[失败] 任务 '{task_name}' 已存在于项目 '{project_name}' 中"
 
-    existing = conn.execute("SELECT id FROM tasks WHERE project_id = ? AND name = ?", (pid, task_name)).fetchone()
-    if existing:
+        # 查找父任务
+        parent_id = None
+        parent_msg = ""
+        if parent_task:
+            parent_row = conn.execute(
+                "SELECT id, name FROM tasks WHERE project_id = ? AND name = ?",
+                (pid, parent_task),
+            ).fetchone()
+            if not parent_row:
+                return f"[失败] 父任务 '{parent_task}' 在项目 '{project_name}' 中不存在"
+            parent_id = parent_row["id"]
+            parent_msg = f"，父任务: '{parent_task}'"
+
+        conn.execute(
+            "INSERT INTO tasks (project_id, parent_id, name, description, status, start_time, end_time, priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (pid, parent_id, task_name, description, status, start_time, end_time, priority),
+        )
+        conn.commit()
+        return f"[成功] 已为项目 '{project_name}' 添加任务: {task_name} (状态: {status}){parent_msg}"
+    finally:
         conn.close()
-        return f"[失败] 任务 '{task_name}' 已存在于项目 '{project_name}' 中"
-
-    # 查找父任务
-    parent_id = None
-    parent_msg = ""
-    if parent_task:
-        parent_row = conn.execute(
-            "SELECT id, name FROM tasks WHERE project_id = ? AND name = ?",
-            (pid, parent_task),
-        ).fetchone()
-        if not parent_row:
-            conn.close()
-            return f"[失败] 父任务 '{parent_task}' 在项目 '{project_name}' 中不存在"
-        parent_id = parent_row["id"]
-        parent_msg = f"，父任务: '{parent_task}'"
-
-    conn.execute(
-        "INSERT INTO tasks (project_id, parent_id, name, description, status, start_time, end_time, priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (pid, parent_id, task_name, description, status, start_time, end_time, priority),
-    )
-    conn.commit()
-    conn.close()
-    return f"[成功] 已为项目 '{project_name}' 添加任务: {task_name} (状态: {status}){parent_msg}"
 
 
 def task_update(project_name: str, task_name: str, new_task_name: str = None, description: str = None, status: str = None, start_time: str = None, end_time: str = None, priority: str = None) -> str:
     """更新子任务"""
     conn = _get_conn()
-    proj = conn.execute("SELECT id FROM projects WHERE name = ?", (project_name,)).fetchone()
-    if not proj:
-        conn.close()
-        return f"[失败] 项目 '{project_name}' 不存在"
-    task = conn.execute("SELECT * FROM tasks WHERE project_id = ? AND name = ?", (proj["id"], task_name)).fetchone()
-    if not task:
-        conn.close()
-        return f"[失败] 任务 '{task_name}' 不存在于项目 '{project_name}' 中"
+    try:
+        proj = conn.execute("SELECT id FROM projects WHERE name = ?", (project_name,)).fetchone()
+        if not proj:
+            return f"[失败] 项目 '{project_name}' 不存在"
+        task = conn.execute("SELECT * FROM tasks WHERE project_id = ? AND name = ?", (proj["id"], task_name)).fetchone()
+        if not task:
+            return f"[失败] 任务 '{task_name}' 不存在于项目 '{project_name}' 中"
 
-    updates = []
-    params = []
-    if new_task_name is not None:
-        updates.append("name = ?")
-        params.append(new_task_name)
-    if description is not None:
-        updates.append("description = ?")
-        params.append(description)
-    if status is not None:
-        updates.append("status = ?")
-        params.append(status)
-    if start_time is not None:
-        updates.append("start_time = ?")
-        params.append(start_time)
-    if end_time is not None:
-        updates.append("end_time = ?")
-        params.append(end_time)
-    if priority is not None:
-        updates.append("priority = ?")
-        params.append(priority)
+        updates = []
+        params = []
+        if new_task_name is not None:
+            updates.append("name = ?")
+            params.append(new_task_name)
+        if description is not None:
+            updates.append("description = ?")
+            params.append(description)
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+        if start_time is not None:
+            updates.append("start_time = ?")
+            params.append(start_time)
+        if end_time is not None:
+            updates.append("end_time = ?")
+            params.append(end_time)
+        if priority is not None:
+            updates.append("priority = ?")
+            params.append(priority)
 
-    if not updates:
+        if not updates:
+            return "[提示] 没有要更新的字段"
+
+        updates.append("updated_at = datetime('now','localtime')")
+        params.append(task["id"])
+        conn.execute(f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?", params)
+        conn.commit()
+        return f"[成功] 任务 '{task_name}' 已更新"
+    finally:
         conn.close()
-        return "[提示] 没有要更新的字段"
-
-    updates.append("updated_at = datetime('now','localtime')")
-    params.append(task["id"])
-    conn.execute(f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?", params)
-    conn.commit()
-    conn.close()
-    return f"[成功] 任务 '{task_name}' 已更新"
 
 
 def task_delete(project_name: str, task_name: str) -> str:
     """删除任务及其所有子任务（级联删除）"""
     conn = _get_conn()
-    proj = conn.execute("SELECT id FROM projects WHERE name = ?", (project_name,)).fetchone()
-    if not proj:
-        conn.close()
-        return f"[失败] 项目 '{project_name}' 不存在"
-    task = conn.execute("SELECT id FROM tasks WHERE project_id = ? AND name = ?", (proj["id"], task_name)).fetchone()
-    if not task:
-        conn.close()
-        return f"[失败] 任务 '{task_name}' 不存在"
+    try:
+        proj = conn.execute("SELECT id FROM projects WHERE name = ?", (project_name,)).fetchone()
+        if not proj:
+            return f"[失败] 项目 '{project_name}' 不存在"
+        task = conn.execute("SELECT id FROM tasks WHERE project_id = ? AND name = ?", (proj["id"], task_name)).fetchone()
+        if not task:
+            return f"[失败] 任务 '{task_name}' 不存在"
 
-    # 递归删除所有子孙任务
-    def _delete_children(parent_id):
-        children = conn.execute("SELECT id FROM tasks WHERE parent_id = ?", (parent_id,)).fetchall()
-        for child in children:
-            _delete_children(child["id"])
-            conn.execute("DELETE FROM tasks WHERE id = ?", (child["id"],))
+        # 递归删除所有子孙任务
+        def _delete_children(parent_id):
+            children = conn.execute("SELECT id FROM tasks WHERE parent_id = ?", (parent_id,)).fetchall()
+            for child in children:
+                _delete_children(child["id"])
+                conn.execute("DELETE FROM tasks WHERE id = ?", (child["id"],))
 
-    _delete_children(task["id"])
-    conn.execute("DELETE FROM tasks WHERE id = ?", (task["id"],))
-    conn.commit()
-    affected = conn.total_changes
-    conn.close()
-    return f"[成功] 任务 '{task_name}' 及其所有子任务已删除 (共 {affected} 条)"
+        _delete_children(task["id"])
+        conn.execute("DELETE FROM tasks WHERE id = ?", (task["id"],))
+        conn.commit()
+        affected = conn.total_changes
+        return f"[成功] 任务 '{task_name}' 及其所有子任务已删除 (共 {affected} 条)"
+    finally:
+        conn.close()
 
 
 def schedule_add(date: str, content: str, time_slot: str = "", priority: str = "中") -> str:
     """添加日程"""
     conn = _get_conn()
-    conn.execute(
-        "INSERT INTO schedule (date, time_slot, content, priority) VALUES (?, ?, ?, ?)",
-        (date, time_slot, content, priority),
-    )
-    conn.commit()
-    conn.close()
-    return f"[成功] 已添加日程: {date} {time_slot} - {content}"
+    try:
+        conn.execute(
+            "INSERT INTO schedule (date, time_slot, content, priority) VALUES (?, ?, ?, ?)",
+            (date, time_slot, content, priority),
+        )
+        conn.commit()
+        return f"[成功] 已添加日程: {date} {time_slot} - {content}"
+    finally:
+        conn.close()
 
 
 def schedule_list(start_date: str, end_date: str = None) -> str:
     """查看日程"""
     conn = _get_conn()
-    if end_date:
-        rows = conn.execute(
-            "SELECT * FROM schedule WHERE date >= ? AND date <= ? ORDER BY date, time_slot",
-            (start_date, end_date),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM schedule WHERE date = ? ORDER BY time_slot",
-            (start_date,),
-        ).fetchall()
-    conn.close()
+    try:
+        if end_date:
+            rows = conn.execute(
+                "SELECT * FROM schedule WHERE date >= ? AND date <= ? ORDER BY date, time_slot",
+                (start_date, end_date),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM schedule WHERE date = ? ORDER BY time_slot",
+                (start_date,),
+            ).fetchall()
+    finally:
+        conn.close()
 
     if not rows:
         return f"[空] {start_date}{' ~ '+end_date if end_date else ''} 无日程安排"
@@ -817,51 +825,55 @@ def schedule_list(start_date: str, end_date: str = None) -> str:
 def schedule_delete(date: str, content: str) -> str:
     """删除日程"""
     conn = _get_conn()
-    conn.execute(
-        "DELETE FROM schedule WHERE date = ? AND content LIKE ?",
-        (date, f"%{content}%"),
-    )
-    conn.commit()
-    affected = conn.total_changes
-    conn.close()
-    if affected > 0:
-        return f"[成功] 已删除 {date} 包含 '{content}' 的 {affected} 条日程"
-    return f"[失败] 未找到匹配的日程"
+    try:
+        conn.execute(
+            "DELETE FROM schedule WHERE date = ? AND content LIKE ?",
+            (date, f"%{content}%"),
+        )
+        conn.commit()
+        affected = conn.total_changes
+        if affected > 0:
+            return f"[成功] 已删除 {date} 包含 '{content}' 的 {affected} 条日程"
+        return f"[失败] 未找到匹配的日程"
+    finally:
+        conn.close()
 
 
 def project_export_csv() -> str:
     """导出所有项目和任务为CSV格式文本"""
     conn = _get_conn()
-    projects = conn.execute("SELECT * FROM projects ORDER BY name").fetchall()
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow([
-        "项目名称", "项目描述", "负责人", "截止时间", "目标", "状态", "进度",
-        "任务名称", "任务描述", "任务状态", "开始时间", "结束时间", "优先级", "父任务",
-    ])
+    try:
+        projects = conn.execute("SELECT * FROM projects ORDER BY name").fetchall()
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "项目名称", "项目描述", "负责人", "截止时间", "目标", "状态", "进度",
+            "任务名称", "任务描述", "任务状态", "开始时间", "结束时间", "优先级", "父任务",
+        ])
 
-    for p in projects:
-        tasks = conn.execute(
-            "SELECT t.*, pt.name as parent_name FROM tasks t LEFT JOIN tasks pt ON t.parent_id = pt.id WHERE t.project_id = ? ORDER BY t.created_at",
-            (p["id"],),
-        ).fetchall()
-        if tasks:
-            for t in tasks:
+        for p in projects:
+            tasks = conn.execute(
+                "SELECT t.*, pt.name as parent_name FROM tasks t LEFT JOIN tasks pt ON t.parent_id = pt.id WHERE t.project_id = ? ORDER BY t.created_at",
+                (p["id"],),
+            ).fetchall()
+            if tasks:
+                for t in tasks:
+                    writer.writerow([
+                        p["name"], p["description"], p["leader"], p["deadline"],
+                        p["goal"], p["status"], f"{p['progress']:.0f}%",
+                        t["name"], t["description"], t["status"],
+                        t["start_time"], t["end_time"], t["priority"],
+                        t["parent_name"] or "",
+                    ])
+            else:
                 writer.writerow([
                     p["name"], p["description"], p["leader"], p["deadline"],
                     p["goal"], p["status"], f"{p['progress']:.0f}%",
-                    t["name"], t["description"], t["status"],
-                    t["start_time"], t["end_time"], t["priority"],
-                    t["parent_name"] or "",
+                    "", "", "", "", "", "", "",
                 ])
-        else:
-            writer.writerow([
-                p["name"], p["description"], p["leader"], p["deadline"],
-                p["goal"], p["status"], f"{p['progress']:.0f}%",
-                "", "", "", "", "", "", "",
-            ])
+    finally:
+        conn.close()
 
-    conn.close()
     csv_text = output.getvalue()
     output.close()
     return f"[导出成功] 共 {len(projects)} 个项目\n\n```csv\n{csv_text}```"
@@ -871,106 +883,108 @@ def project_import_csv(csv_content: str) -> str:
     """从CSV文本导入项目和任务"""
     reader = csv.DictReader(io.StringIO(csv_content.strip()))
     conn = _get_conn()
-    imported_projects = 0
-    imported_tasks = 0
-    skipped = 0
+    try:
+        imported_projects = 0
+        imported_tasks = 0
+        skipped = 0
 
-    for row in reader:
-        proj_name = row.get("项目名称", "").strip()
-        if not proj_name:
-            continue
+        for row in reader:
+            proj_name = row.get("项目名称", "").strip()
+            if not proj_name:
+                continue
 
-        # 检查项目是否已存在
-        existing = conn.execute("SELECT id FROM projects WHERE name = ?", (proj_name,)).fetchone()
-        if existing:
-            pid = existing["id"]
-            # 项目存在，跳过创建项目，但尝试导入任务
-        else:
-            conn.execute(
-                "INSERT INTO projects (name, description, leader, deadline, goal, status, progress) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    proj_name,
-                    row.get("项目描述", ""),
-                    row.get("负责人", ""),
-                    row.get("截止时间", ""),
-                    row.get("目标", ""),
-                    row.get("状态", "待启动"),
-                    float(row.get("进度", "0").replace("%", "") or 0),
-                ),
-            )
-            conn.commit()
-            pid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-            imported_projects += 1
-
-        # 导入任务
-        task_name = row.get("任务名称", "").strip()
-        if task_name:
-            task_existing = conn.execute(
-                "SELECT id FROM tasks WHERE project_id = ? AND name = ?",
-                (pid, task_name),
-            ).fetchone()
-            if task_existing:
-                skipped += 1
+            # 检查项目是否已存在
+            existing = conn.execute("SELECT id FROM projects WHERE name = ?", (proj_name,)).fetchone()
+            if existing:
+                pid = existing["id"]
+                # 项目存在，跳过创建项目，但尝试导入任务
             else:
-                # 处理父任务引用
-                parent_id = None
-                parent_task_name = row.get("父任务", "").strip()
-                if parent_task_name:
-                    parent_row = conn.execute(
-                        "SELECT id FROM tasks WHERE project_id = ? AND name = ?",
-                        (pid, parent_task_name),
-                    ).fetchone()
-                    if parent_row:
-                        parent_id = parent_row["id"]
-
                 conn.execute(
-                    "INSERT INTO tasks (project_id, parent_id, name, description, status, start_time, end_time, priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO projects (name, description, leader, deadline, goal, status, progress) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
-                        pid, parent_id,
-                        task_name,
-                        row.get("任务描述", ""),
-                        row.get("任务状态", "待启动"),
-                        row.get("开始时间", ""),
-                        row.get("结束时间", ""),
-                        row.get("优先级", "中"),
+                        proj_name,
+                        row.get("项目描述", ""),
+                        row.get("负责人", ""),
+                        row.get("截止时间", ""),
+                        row.get("目标", ""),
+                        row.get("状态", "待启动"),
+                        float(row.get("进度", "0").replace("%", "") or 0),
                     ),
                 )
-                imported_tasks += 1
+                conn.commit()
+                pid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                imported_projects += 1
 
-    conn.commit()
-    conn.close()
-    return f"[导入成功] 新增项目: {imported_projects} 个, 新增任务: {imported_tasks} 个, 跳过重复: {skipped} 个"
+            # 导入任务
+            task_name = row.get("任务名称", "").strip()
+            if task_name:
+                task_existing = conn.execute(
+                    "SELECT id FROM tasks WHERE project_id = ? AND name = ?",
+                    (pid, task_name),
+                ).fetchone()
+                if task_existing:
+                    skipped += 1
+                else:
+                    # 处理父任务引用
+                    parent_id = None
+                    parent_task_name = row.get("父任务", "").strip()
+                    if parent_task_name:
+                        parent_row = conn.execute(
+                            "SELECT id FROM tasks WHERE project_id = ? AND name = ?",
+                            (pid, parent_task_name),
+                        ).fetchone()
+                        if parent_row:
+                            parent_id = parent_row["id"]
+
+                    conn.execute(
+                        "INSERT INTO tasks (project_id, parent_id, name, description, status, start_time, end_time, priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            pid, parent_id,
+                            task_name,
+                            row.get("任务描述", ""),
+                            row.get("任务状态", "待启动"),
+                            row.get("开始时间", ""),
+                            row.get("结束时间", ""),
+                            row.get("优先级", "中"),
+                        ),
+                    )
+                    imported_tasks += 1
+
+        conn.commit()
+        return f"[导入成功] 新增项目: {imported_projects} 个, 新增任务: {imported_tasks} 个, 跳过重复: {skipped} 个"
+    finally:
+        conn.close()
 
 
 def project_summary() -> str:
     """生成项目进度总览报告"""
     conn = _get_conn()
-    projects = conn.execute("SELECT * FROM projects ORDER BY name").fetchall()
+    try:
+        projects = conn.execute("SELECT * FROM projects ORDER BY name").fetchall()
 
-    if not projects:
+        if not projects:
+            return "[空] 暂无项目"
+
+        total = len(projects)
+        active = sum(1 for p in projects if p["status"] == "推进中")
+        done = sum(1 for p in projects if p["status"] == "已完成")
+        pending = sum(1 for p in projects if p["status"] in ("待启动", "未启动"))
+        avg_progress = sum(p["progress"] or 0 for p in projects) / total if total > 0 else 0
+
+        # 统计任务（每个项目的任务树统计）
+        total_tasks = 0
+        done_tasks = 0
+        active_tasks = 0
+        for p in projects:
+            p_rows = conn.execute("SELECT * FROM tasks WHERE project_id = ?", (p["id"],)).fetchall()
+            if p_rows:
+                p_tree = _build_task_tree(p_rows)
+                c_total, c_done, c_active, _ = _count_task_status(p_tree)
+                total_tasks += c_total
+                done_tasks += c_done
+                active_tasks += c_active
+    finally:
         conn.close()
-        return "[空] 暂无项目"
-
-    total = len(projects)
-    active = sum(1 for p in projects if p["status"] == "推进中")
-    done = sum(1 for p in projects if p["status"] == "已完成")
-    pending = sum(1 for p in projects if p["status"] in ("待启动", "未启动"))
-    avg_progress = sum(p["progress"] or 0 for p in projects) / total if total > 0 else 0
-
-    # 统计任务（每个项目的任务树统计）
-    total_tasks = 0
-    done_tasks = 0
-    active_tasks = 0
-    for p in projects:
-        p_rows = conn.execute("SELECT * FROM tasks WHERE project_id = ?", (p["id"],)).fetchall()
-        if p_rows:
-            p_tree = _build_task_tree(p_rows)
-            c_total, c_done, c_active, _ = _count_task_status(p_tree)
-            total_tasks += c_total
-            done_tasks += c_done
-            active_tasks += c_active
-
-    conn.close()
 
     lines = [
         "=" * 50,

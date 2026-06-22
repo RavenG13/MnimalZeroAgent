@@ -151,21 +151,23 @@ def save_memory(content: str, tags: str = "") -> str:
     try:
         uid = get_current_user()
         conn = _get_conn(uid)
-        cursor = conn.cursor()
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute(
-            "INSERT INTO memories (time, content, tags) VALUES (?, ?, ?)",
-            (now, content, tags)
-        )
-        conn.commit()
-        new_id = cursor.lastrowid
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cursor.execute(
+                "INSERT INTO memories (time, content, tags) VALUES (?, ?, ?)",
+                (now, content, tags)
+            )
+            conn.commit()
+            new_id = cursor.lastrowid
 
-        # 统计该用户总记录数
-        cursor.execute("SELECT COUNT(*) as cnt FROM memories")
-        total = cursor.fetchone()["cnt"]
-        conn.close()
+            # 统计该用户总记录数
+            cursor.execute("SELECT COUNT(*) as cnt FROM memories")
+            total = cursor.fetchone()["cnt"]
 
-        return f"[成功] 记忆已保存，id={new_id}（共 {total} 条）"
+            return f"[成功] 记忆已保存，id={new_id}（共 {total} 条）"
+        finally:
+            conn.close()
     except Exception as e:
         return f"[错误] 保存记忆失败: {e}"
 
@@ -175,30 +177,32 @@ def load_memory(limit: int = 50) -> str:
     try:
         uid = get_current_user()
         conn = _get_conn(uid)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        cursor.execute(
-            "SELECT id, time, content, tags FROM memories ORDER BY id DESC LIMIT ?",
-            (limit,)
-        )
+            cursor.execute(
+                "SELECT id, time, content, tags FROM memories ORDER BY id DESC LIMIT ?",
+                (limit,)
+            )
 
-        rows = cursor.fetchall()
-        conn.close()
+            rows = cursor.fetchall()
 
-        if not rows:
-            return f"[空] 当前没有任何记忆记录。"
+            if not rows:
+                return f"[空] 当前没有任何记忆记录。"
 
-        lines = [f"记忆记录 ({len(rows)} 条)"]
-        lines.append("=" * 50)
-        for row in rows:
-            entry_id = row["id"]
-            t = row["time"]
-            tags_str = f" [{row['tags']}]" if row["tags"] else ""
-            content_preview = (row["content"] or "")[:200]
-            lines.append(f"\n  #{entry_id} [{t}]{tags_str}")
-            lines.append(f"    {content_preview}")
+            lines = [f"记忆记录 ({len(rows)} 条)"]
+            lines.append("=" * 50)
+            for row in rows:
+                entry_id = row["id"]
+                t = row["time"]
+                tags_str = f" [{row['tags']}]" if row["tags"] else ""
+                content_preview = (row["content"] or "")[:200]
+                lines.append(f"\n  #{entry_id} [{t}]{tags_str}")
+                lines.append(f"    {content_preview}")
 
-        return "\n".join(lines)
+            return "\n".join(lines)
+        finally:
+            conn.close()
     except Exception as e:
         return f"[错误] 加载记忆失败: {e}"
 
@@ -208,13 +212,15 @@ def clear_memory() -> str:
     try:
         uid = get_current_user()
         conn = _get_conn(uid)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM memories")
-        deleted = cursor.rowcount
-        cursor.execute("DELETE FROM sqlite_sequence WHERE name='memories'")
-        conn.commit()
-        conn.close()
-        return f"[成功] 已清空 {deleted} 条记忆记录。"
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM memories")
+            deleted = cursor.rowcount
+            cursor.execute("DELETE FROM sqlite_sequence WHERE name='memories'")
+            conn.commit()
+            return f"[成功] 已清空 {deleted} 条记忆记录。"
+        finally:
+            conn.close()
     except Exception as e:
         return f"[错误] 清空记忆失败: {e}"
 
@@ -224,29 +230,31 @@ def search_memory(keyword: str, limit: int = 20) -> str:
     try:
         uid = get_current_user()
         conn = _get_conn(uid)
-        cursor = conn.cursor()
-        like_pattern = f"%{keyword}%"
+        try:
+            cursor = conn.cursor()
+            like_pattern = f"%{keyword}%"
 
-        cursor.execute(
-            """SELECT id, time, content, tags FROM memories
-               WHERE content LIKE ? OR tags LIKE ?
-               ORDER BY id DESC LIMIT ?""",
-            (like_pattern, like_pattern, limit)
-        )
+            cursor.execute(
+                """SELECT id, time, content, tags FROM memories
+                   WHERE content LIKE ? OR tags LIKE ?
+                   ORDER BY id DESC LIMIT ?""",
+                (like_pattern, like_pattern, limit)
+            )
 
-        rows = cursor.fetchall()
-        conn.close()
+            rows = cursor.fetchall()
 
-        if not rows:
-            return f"[搜索无结果] 未找到包含 \"{keyword}\" 的记忆记录。"
+            if not rows:
+                return f"[搜索无结果] 未找到包含 \"{keyword}\" 的记忆记录。"
 
-        lines = [f"搜索 \"{keyword}\" 结果 ({len(rows)} 条)"]
-        lines.append("=" * 50)
-        for row in rows:
-            lines.append(f"\n  #{row['id']} [{row['time']}]")
-            content_preview = (row["content"] or "")[:200]
-            lines.append(f"    {content_preview}")
+            lines = [f"搜索 \"{keyword}\" 结果 ({len(rows)} 条)"]
+            lines.append("=" * 50)
+            for row in rows:
+                lines.append(f"\n  #{row['id']} [{row['time']}]")
+                content_preview = (row["content"] or "")[:200]
+                lines.append(f"    {content_preview}")
 
-        return "\n".join(lines)
+            return "\n".join(lines)
+        finally:
+            conn.close()
     except Exception as e:
         return f"[错误] 搜索记忆失败: {e}"

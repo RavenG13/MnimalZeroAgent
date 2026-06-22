@@ -744,7 +744,15 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                                 _mt.set_current_user(username)
                                 user_tools.set_current_user(username)
                                 return fn(**kw)
-                            result = await asyncio.to_thread(_run_with_user, tool_func, user_id, **args)
+                            result = await asyncio.wait_for(
+                                asyncio.to_thread(_run_with_user, tool_func, user_id, **args),
+                                timeout=120,
+                            )
+                        except asyncio.TimeoutError:
+                            result = (
+                                f"[TOOL TIMEOUT] 工具 '{name}' 执行超时 (120s)。\n"
+                                "请尝试简化操作或换个方式完成任务。"
+                            )
                         except Exception as e:
                             error_detail = traceback.format_exc()
                             print(f"[TOOL ERROR] {name}: {error_detail[:300]}")
