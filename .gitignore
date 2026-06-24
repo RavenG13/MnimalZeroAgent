@@ -13,6 +13,7 @@ data/memory/
 data/sessions/
 data/settings/
 data/nodes/
+data/user_tools/
 data/users.json
 .claude/
 client/client_log.txt

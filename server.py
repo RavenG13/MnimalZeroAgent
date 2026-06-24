@@ -14,6 +14,7 @@ import traceback
 import asyncio
 import time
 import copy
+import sqlite3
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -34,8 +35,9 @@ import json as _json
 # ============================================================
 class UTF8JSONResponse(JSONResponse):
     media_type = "application/json; charset=utf-8"
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
+from fastapi.responses import StreamingResponse
 import uvicorn
 
 # 导入认证模块
@@ -97,6 +99,20 @@ def _get_user_client(username: str):
             "支持所有 OpenAI 兼容的服务商：DeepSeek / OpenAI / Ollama / vLLM / Groq 等。"
         )
     return OpenAI(api_key=api_key, base_url=base_url), None
+
+
+def _get_user_async_client(username: str):
+    """根据用户设置创建 AsyncOpenAI 客户端（用于流式输出）。返回 (client, error_msg)。"""
+    settings = _load_user_settings(username)
+    api_key = settings.get("api_key") or DEFAULT_API_KEY
+    base_url = settings.get("base_url") or DEFAULT_BASE_URL
+    if not api_key:
+        return None, (
+            "⚠️ 未配置 API Key，我无法调用 AI 模型。\n\n"
+            "请点击左下角 ⚙️ 齿轮图标，填入你的 API Key。\n"
+            "支持所有 OpenAI 兼容的服务商：DeepSeek / OpenAI / Ollama / vLLM / Groq 等。"
+        )
+    return AsyncOpenAI(api_key=api_key, base_url=base_url), None
 
 
 def _get_user_model(username: str) -> str:
@@ -816,6 +832,239 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=err_msg)
 
 
+@app.post("/chat/stream")
+async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user)):
+    """流式 SSE 端点：发送消息给 Agent，实时推送 token 和工具调用事件。"""
+    async def event_generator():
+        try:
+            user_id = username
+            session = get_or_create_session(user_id, req.session_id)
+
+            ptools.set_current_user(user_id)
+            from tools import memory_tools as mt
+            mt.set_current_user(user_id)
+            user_tools.set_current_user(user_id)
+            ptools._init_db(user_id)
+
+            user_tools_schemas, user_tools_funcs = user_tools.load_user_tools_for_agent(user_id)
+            combined_tools = tools + user_tools_schemas
+            combined_func_map = {**func_map, **user_tools_funcs}
+
+            session.messages.append({"role": "user", "content": req.message})
+
+            user_msg_count = sum(1 for m in session.messages if m["role"] == "user")
+            if user_msg_count == 1:
+                first_msg = req.message.strip()[:30]
+                session.name = first_msg + ("..." if len(req.message.strip()) > 30 else "")
+
+            _persist_session(session)
+
+            max_rounds = 200
+            round_count = 0
+            all_tool_call_records = []
+            full_reply = ""
+
+            while round_count < max_rounds:
+                round_count += 1
+
+                async_client, client_err = _get_user_async_client(user_id)
+                if client_err:
+                    yield f"data: {json.dumps({'type': 'error', 'content': client_err})}\n\n"
+                    return
+                user_model = _get_user_model(user_id)
+
+                client_schemas = _get_client_tool_schemas(user_id)
+                all_tools = combined_tools + client_schemas
+
+                # 使用流式调用 AI
+                stream = await async_client.chat.completions.create(
+                    model=user_model,
+                    messages=session.messages,
+                    tools=all_tools,
+                    tool_choice="auto",
+                    stream=True,
+                    extra_body={"thinking": {"type": "disabled"}},
+                )
+
+                content_parts = []
+                tool_calls_map: dict[int, dict] = {}
+                finish_reason = None
+
+                async for chunk in stream:
+                    if chunk.choices and chunk.choices[0].finish_reason:
+                        finish_reason = chunk.choices[0].finish_reason
+
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if not delta:
+                        continue
+
+                    # 文本内容 → 实时推送给前端
+                    if delta.content:
+                        content_parts.append(delta.content)
+                        full_reply += delta.content
+                        yield f"data: {json.dumps({'type': 'token', 'content': delta.content}, ensure_ascii=False)}\n\n"
+
+                    # 工具调用增量
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+                            if idx not in tool_calls_map:
+                                tool_calls_map[idx] = {
+                                    "id": "",
+                                    "function": {"name": "", "arguments": ""},
+                                }
+                            tc_data = tool_calls_map[idx]
+                            if tc_delta.id:
+                                tc_data["id"] = tc_delta.id
+                            if tc_delta.function:
+                                if tc_delta.function.name:
+                                    tc_data["function"]["name"] += tc_delta.function.name
+                                if tc_delta.function.arguments:
+                                    tc_data["function"]["arguments"] += tc_delta.function.arguments
+
+                # 处理工具调用（本轮有 tool_calls）
+                if tool_calls_map and finish_reason == "tool_calls":
+                    # 构造 assistant 消息（含 tool_calls）
+                    assistant_tool_calls = []
+                    for idx in sorted(tool_calls_map.keys()):
+                        tc = tool_calls_map[idx]
+                        name = tc["function"]["name"]
+                        args_raw = tc["function"]["arguments"]
+                        args = {}
+                        if args_raw and args_raw.strip():
+                            try:
+                                args = json.loads(args_raw)
+                            except json.JSONDecodeError:
+                                args = {}
+
+                        yield f"data: {json.dumps({'type': 'tool_start', 'name': name, 'args': args_raw}, ensure_ascii=False)}\n\n"
+
+                        ptools.set_current_user(user_id)
+                        from tools import memory_tools as mt2
+                        mt2.set_current_user(user_id)
+                        user_tools.set_current_user(user_id)
+
+                        # 工具路由
+                        if "__" in name and name.split("__", 1)[0] in node_registry.get(user_id, {}):
+                            node_name, original_name = name.split("__", 1)
+                            result = await _call_node_tool(user_id, node_name, original_name, args)
+                        elif name == "list_connected_devices":
+                            try:
+                                result = list_connected_devices(_username=user_id)
+                            except Exception as e:
+                                result = f"[TOOL ERROR] {type(e).__name__}: {e}"
+                        else:
+                            tool_func = combined_func_map.get(name)
+                            if tool_func:
+                                try:
+                                    def _run_with_user(fn, uname, **kw):
+                                        ptools.set_current_user(uname)
+                                        from tools import memory_tools as _mt
+                                        _mt.set_current_user(uname)
+                                        user_tools.set_current_user(uname)
+                                        return fn(**kw)
+                                    result = await asyncio.wait_for(
+                                        asyncio.to_thread(_run_with_user, tool_func, user_id, **args),
+                                        timeout=120,
+                                    )
+                                except asyncio.TimeoutError:
+                                    result = f"[TOOL TIMEOUT] 工具 '{name}' 执行超时 (120s)。"
+                                except Exception as e:
+                                    result = f"[TOOL ERROR] {type(e).__name__}: {e}"
+                            else:
+                                result = f"[ERROR] Unknown tool: {name}"
+
+                        result_preview = str(result)[:300]
+                        yield f"data: {json.dumps({'type': 'tool_end', 'name': name, 'result': result_preview}, ensure_ascii=False)}\n\n"
+
+                        all_tool_call_records.append({
+                            "name": name, "arguments": args, "result_preview": result_preview,
+                        })
+
+                        assistant_tool_calls.append({
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": args_raw,
+                            },
+                        })
+
+                    # 保存 assistant(tool_calls) + tool 消息到会话历史
+                    session.messages.append({
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": assistant_tool_calls,
+                    })
+                    for idx in sorted(tool_calls_map.keys()):
+                        tc = tool_calls_map[idx]
+                        name = tc["function"]["name"]
+                        # 找到对应的 result
+                        result_content = ""
+                        for rec in all_tool_call_records:
+                            if rec["name"] == name:
+                                result_content = str(rec.get("result_preview", ""))
+                                break
+                        session.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": result_content,
+                        })
+
+                    # 热重载用户工具
+                    if user_tools.is_user_tools_dirty(user_id):
+                        user_tools.clear_user_tools_dirty(user_id)
+                        new_schemas, new_funcs = user_tools.load_user_tools_for_agent(user_id)
+                        combined_tools = tools + new_schemas
+                        combined_func_map = {**func_map, **new_funcs}
+
+                    continue  # 下一轮
+
+                # 没有工具调用 → 这是最终回复
+                reply_text = "".join(content_parts)
+                session.messages.append({"role": "assistant", "content": reply_text})
+
+                # 保存记忆
+                summary = f"User({user_id}) asked: {req.message}\nAI answered: {reply_text[:200]}"
+                save_func = combined_func_map.get("save_memory")
+                if save_func:
+                    try:
+                        save_func(summary, tags="cloud,chat")
+                    except Exception:
+                        pass
+
+                _persist_session(session)
+
+                yield f"data: {json.dumps({'type': 'done', 'session_id': session.session_id, 'tool_calls': all_tool_call_records if all_tool_call_records else None}, ensure_ascii=False)}\n\n"
+                return
+
+            # 达到最大轮数
+            _persist_session(session)
+            yield f"data: {json.dumps({'type': 'error', 'content': f'达到最大工具调用轮数 ({max_rounds})，任务可能过于复杂。'}, ensure_ascii=False)}\n\n"
+
+        except asyncio.CancelledError:
+            # 客户端断开连接（用户点了停止）
+            if full_reply:
+                session.messages.append({"role": "assistant", "content": full_reply})
+                _persist_session(session)
+            yield f"data: {json.dumps({'type': 'done', 'session_id': session.session_id, 'stopped': True}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            err_msg = f"{type(e).__name__}: {str(e)}"
+            print(f"[ERROR] chat_stream: {err_msg}")
+            print(traceback.format_exc())
+            yield f"data: {json.dumps({'type': 'error', 'content': err_msg}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.get("/projects")
 async def list_projects(username: str = Depends(get_current_user)):
     """返回所有项目及其任务树（多级层级结构）"""
@@ -967,9 +1216,264 @@ async def api_delete_session(session_id: str, username: str = Depends(get_curren
     return {"status": "ok", "message": f"Session {session_id} deleted"}
 
 
+@app.delete("/api/sessions/{session_id}/messages/{round_index}")
+async def api_delete_message(session_id: str, round_index: int, username: str = Depends(get_current_user)):
+    """删除会话中指定轮次的问答记录（一轮 = 一条 user 消息 + 紧随其后的所有 assistant/tool 消息）。
+
+    round_index 从 0 开始，表示第几轮用户对话。
+    """
+    session = sessions.get(session_id)
+    if not session:
+        disk_sessions = _load_user_sessions_from_disk(username)
+        if session_id in disk_sessions:
+            session = Session.from_dict(disk_sessions[session_id])
+            sessions[session_id] = session
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.user_id != username:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # 找出所有 user 消息的索引
+    user_indices = [
+        i for i, m in enumerate(session.messages)
+        if m["role"] == "user"
+    ]
+
+    if round_index < 0 or round_index >= len(user_indices):
+        raise HTTPException(status_code=404, detail=f"Round {round_index} not found (total rounds: {len(user_indices)})")
+
+    start_idx = user_indices[round_index]
+    # 结束位置：下一个 user 消息的索引，或消息列表末尾
+    if round_index + 1 < len(user_indices):
+        end_idx = user_indices[round_index + 1]
+    else:
+        end_idx = len(session.messages)
+
+    # 删除该轮所有消息
+    del session.messages[start_idx:end_idx]
+    _persist_session(session)
+
+    return {"status": "ok", "message": f"Round {round_index} deleted", "remaining_rounds": len(user_indices) - 1}
+
+
 @app.get("/health")
 async def health():
     return {"status": "healthy", "sessions": len(sessions), "tools": len(tools)}
+
+
+# ============================================================
+#  Database Table API — 类似 Excel 的表格视图
+#  允许用户直接查看/编辑数据库中所有项目管理表
+# ============================================================
+
+# 允许访问的表白名单
+_ALLOWED_TABLES = {"projects", "tasks", "schedule"}
+
+# 每张表的显示配置：隐藏列、计算列、JOIN 子句、列顺序
+# column_order 可选：{col_name: position}，position 越小越靠前（0-based）
+_TABLE_DISPLAY_CONFIG = {
+    "tasks": {
+        "hidden_columns": {"id", "project_id"},
+        "computed_columns": {
+            "project_name": "COALESCE(p.name, '(无项目)') AS project_name",
+        },
+        "join_clause": "LEFT JOIN projects p ON tasks.project_id = p.id",
+        # project_name 紧跟在 description 后面
+        "column_order": {
+            "project_name": "description",  # 插入到 description 列之后
+        },
+    },
+    "projects": {
+        "hidden_columns": set(),
+    },
+    "schedule": {
+        "hidden_columns": set(),
+    },
+}
+
+
+def _get_display_columns(username: str, table: str) -> list[str]:
+    """获取指定表在前端显示的列名列表（排除隐藏列，加入计算列，按指定顺序排列）"""
+    cfg = _TABLE_DISPLAY_CONFIG.get(table, {})
+    hidden = cfg.get("hidden_columns", set())
+    computed = cfg.get("computed_columns", {})
+    col_order = cfg.get("column_order", {})
+    raw_cols = _get_table_columns(username, table)
+
+    # 排列原始列（排除隐藏）
+    display = [c for c in raw_cols if c not in hidden]
+
+    # 按 column_order 插入计算列
+    for comp_name, position in col_order.items():
+        if comp_name in computed:
+            if position is None:
+                # None 表示未指定具体位置，保持默认：追加到末尾
+                if comp_name not in display:
+                    display.append(comp_name)
+            elif isinstance(position, str) and position in display:
+                # 字符串：插入到指定列名之后
+                idx = display.index(position)
+                if comp_name not in display:
+                    display.insert(idx + 1, comp_name)
+            elif isinstance(position, int) and 0 <= position <= len(display):
+                # 整数：插入到指定索引
+                if comp_name not in display:
+                    display.insert(position, comp_name)
+            else:
+                if comp_name not in display:
+                    display.append(comp_name)
+        elif comp_name not in display:
+            display.append(comp_name)
+
+    return display
+    return display
+
+
+def _build_select_clause(table: str, columns: list[str]) -> str:
+    """为指定表构建 SELECT 子句（处理计算列）"""
+    cfg = _TABLE_DISPLAY_CONFIG.get(table, {})
+    computed = cfg.get("computed_columns", {})
+    parts = []
+    for col in columns:
+        if col in computed:
+            parts.append(computed[col])
+        else:
+            parts.append(f"{table}.{col}")
+    return ", ".join(parts)
+
+
+def _get_table_columns(username: str, table: str) -> list[str]:
+    """获取指定表的列名列表"""
+    conn = ptools._get_conn(username)
+    try:
+        cur = conn.execute(f"PRAGMA table_info({table})")
+        cols = [row[1] for row in cur.fetchall()]
+        return cols
+    finally:
+        conn.close()
+
+
+@app.get("/api/db/tables")
+async def api_list_db_tables(username: str = Depends(get_current_user)):
+    """列出用户 projects.db 中所有表的名称和 schema"""
+    ptools.set_current_user(username)
+    ptools._init_db(username)
+    conn = ptools._get_conn(username)
+    try:
+        cur = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        )
+        table_names = [row[0] for row in cur.fetchall()]
+        tables_info = []
+        for tname in table_names:
+            # 使用显示列（排除隐藏列、加入计算列）
+            display_cols = _get_display_columns(username, tname)
+            tables_info.append({
+                "name": tname,
+                "columns": display_cols,
+                "row_count": conn.execute(f"SELECT COUNT(*) FROM {tname}").fetchone()[0],
+            })
+        return {"tables": tables_info}
+    finally:
+        conn.close()
+
+
+@app.get("/api/db/tables/{table_name}/rows")
+async def api_get_table_rows(table_name: str, username: str = Depends(get_current_user)):
+    """获取指定表的所有行数据（显示列，处理隐藏列和计算列）"""
+    if table_name not in _ALLOWED_TABLES:
+        raise HTTPException(status_code=403, detail=f"Table '{table_name}' is not accessible")
+    ptools.set_current_user(username)
+    ptools._init_db(username)
+    conn = ptools._get_conn(username)
+    try:
+        conn.row_factory = sqlite3.Row
+        cfg = _TABLE_DISPLAY_CONFIG.get(table_name, {})
+        join_clause = cfg.get("join_clause", "")
+        display_cols = _get_display_columns(username, table_name)
+        select_clause = _build_select_clause(table_name, display_cols)
+        sql = f"SELECT {select_clause} FROM {table_name} {join_clause} ORDER BY {table_name}.id"
+        cur = conn.execute(sql)
+        rows = [dict(r) for r in cur.fetchall()]
+        return {"table": table_name, "columns": display_cols, "rows": rows, "count": len(rows)}
+    finally:
+        conn.close()
+
+
+@app.put("/api/db/tables/{table_name}/rows/{row_id}")
+async def api_update_row(table_name: str, row_id: int, req: dict, username: str = Depends(get_current_user)):
+    """更新指定行的指定列"""
+    if table_name not in _ALLOWED_TABLES:
+        raise HTTPException(status_code=403, detail=f"Table '{table_name}' is not accessible")
+    ptools.set_current_user(username)
+    ptools._init_db(username)
+    valid_cols = set(_get_table_columns(username, table_name))
+    # 过滤非法列名
+    updates = {k: v for k, v in req.items() if k in valid_cols and k != "id"}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No valid columns to update")
+    conn = ptools._get_conn(username)
+    try:
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [row_id]
+        conn.execute(f"UPDATE {table_name} SET {set_clause} WHERE id = ?", values)
+        conn.commit()
+        return {"status": "ok", "updated": updates, "row_id": row_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@app.post("/api/db/tables/{table_name}/rows")
+async def api_add_row(table_name: str, req: dict, username: str = Depends(get_current_user)):
+    """向指定表添加新行"""
+    if table_name not in _ALLOWED_TABLES:
+        raise HTTPException(status_code=403, detail=f"Table '{table_name}' is not accessible")
+    ptools.set_current_user(username)
+    ptools._init_db(username)
+    valid_cols = set(_get_table_columns(username, table_name))
+    # 过滤非法列名，去除 id（自增）
+    data = {k: v for k, v in req.items() if k in valid_cols and k != "id"}
+    if not data:
+        raise HTTPException(status_code=400, detail="No valid columns provided")
+    conn = ptools._get_conn(username)
+    try:
+        cols = ", ".join(data.keys())
+        placeholders = ", ".join("?" for _ in data)
+        cur = conn.execute(f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders})", list(data.values()))
+        conn.commit()
+        new_id = cur.lastrowid
+        # 读取刚插入的行
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(f"SELECT * FROM {table_name} WHERE id = ?", (new_id,)).fetchone()
+        return {"status": "ok", "row": dict(row) if row else {"id": new_id}}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@app.delete("/api/db/tables/{table_name}/rows/{row_id}")
+async def api_delete_row(table_name: str, row_id: int, username: str = Depends(get_current_user)):
+    """删除指定行"""
+    if table_name not in _ALLOWED_TABLES:
+        raise HTTPException(status_code=403, detail=f"Table '{table_name}' is not accessible")
+    ptools.set_current_user(username)
+    ptools._init_db(username)
+    conn = ptools._get_conn(username)
+    try:
+        cur = conn.execute(f"DELETE FROM {table_name} WHERE id = ?", (row_id,))
+        conn.commit()
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail=f"Row {row_id} not found in {table_name}")
+        return {"status": "ok", "deleted": row_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 
 # ============================================================
@@ -1294,7 +1798,7 @@ if __name__ == "__main__":
     print(f"  API Docs: {local_url}/docs")
     print(f"  Model:    {DEFAULT_MODEL}")
     print(f"  API URL:  {DEFAULT_BASE_URL}")
-    print(f"  API Key:  {'✔ 全局默认已配置' if DEFAULT_API_KEY else '⚠ 需用户在设置中配置'}")
+    print(f"  API Key:  {'[OK] global default configured' if DEFAULT_API_KEY else '[!] need user config in settings'}")
     print(f"  Tools:    {len(tools)} loaded")
     print(f"  Blocked:  {', '.join(CLOUD_BLOCKED_TOOLS) if CLOUD_BLOCKED_TOOLS else '(none)'}")
     print("=" * 55)

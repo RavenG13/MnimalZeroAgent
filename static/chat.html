@@ -193,6 +193,55 @@
   .btn.secondary { background: #2a2a3a; color: #ccc; }
   .btn.secondary:hover { background: #3a3a4a; }
   .btn.small { padding: 6px 12px; font-size: 11px; border-radius: 5px; }
+  .btn-stop {
+    background: #e74c3c; border: none; border-radius: 8px; padding: 10px 18px;
+    color: white; font-size: 14px; cursor: pointer; transition: all 0.2s;
+    white-space: nowrap; display: none; align-items: center; gap: 6px;
+  }
+  .btn-stop:hover { background: #c0392b; }
+  .btn-stop .stop-icon {
+    width: 12px; height: 12px; background: white; border-radius: 2px;
+  }
+  .btn-send { display: flex; }
+  .generating .btn-send { display: none; }
+  .generating .btn-stop { display: flex; }
+  .generating textarea { border-color: #e74c3c; }
+
+  /* 消息删除按钮 */
+  .message-wrapper {
+    position: relative;
+    display: flex; flex-direction: column;
+  }
+  .message-wrapper.user-msg { align-items: flex-end; }
+  .message-wrapper.assistant-msg { align-items: flex-start; }
+  .msg-delete-btn {
+    position: absolute;
+    top: 4px; right: 4px;
+    width: 22px; height: 22px;
+    border: none; background: rgba(0,0,0,0.6);
+    color: #666; cursor: pointer; border-radius: 4px;
+    font-size: 12px; display: none;
+    align-items: center; justify-content: center;
+    z-index: 5; transition: all 0.15s;
+  }
+  .message-wrapper:hover .msg-delete-btn { display: flex; }
+  .msg-delete-btn:hover { color: #ff6b6b; background: #2a1a1a; }
+  .message-wrapper.user-msg .msg-delete-btn { right: auto; left: 4px; }
+
+  /* 流式输出光标 */
+  .streaming-cursor::after {
+    content: '▊';
+    animation: blink 1s step-end infinite;
+    color: #a29bfe;
+  }
+  @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+
+  /* 已停止标记 */
+  .stopped-badge {
+    display: inline-block;
+    font-size: 10px; color: #e74c3c; margin-top: 4px;
+    font-style: italic;
+  }
 
   /* 弹窗 */
   .modal-overlay { display: none; position: fixed; top:0;left:0;right:0;bottom:0; background:rgba(0,0,0,0.7); z-index:100; justify-content:center; align-items:center; }
@@ -387,6 +436,380 @@
   .msg-content hr { border: none; border-top: 1px solid #2a2a3a; margin: 12px 0; }
   .msg-content strong { color: #e8e8e8; font-weight: 600; }
   .msg-content img { max-width: 100%; border-radius: 6px; }
+
+  /* ========== 主题色彩系统（CSS 变量 + data-theme 预设） ========== */
+  :root {
+    --bg-body: #0f1117;
+    --bg-panel: #141620;
+    --bg-card: #1a1d2e;
+    --bg-header: linear-gradient(135deg, #1a1d2e, #252840);
+    --bg-input: #1a1d2e;
+    --bg-activity: #11131f;
+    --bg-msg-user: #2a1a5e;
+    --bg-msg-assistant: #1a1d2e;
+    --bg-hover: #1a1d2e;
+    --bg-toolbar: #141620;
+    --bg-sheet: #11131f;
+    --border-main: #2a2a3a;
+    --border-subtle: #333;
+    --border-input: #333;
+    --accent: #6c5ce7;
+    --accent-light: #a29bfe;
+    --accent-glow: rgba(108,92,231,0.08);
+    --text-primary: #e0e0e0;
+    --text-secondary: #ccc;
+    --text-muted: #888;
+    --text-dim: #555;
+    --text-header-accent: #a29bfe;
+    --scrollbar-thumb: #333;
+    --scrollbar-thumb-hover: #555;
+  }
+
+  body {
+    background: var(--bg-body);
+    color: var(--text-primary);
+  }
+  .header { background: var(--bg-header); border-bottom-color: var(--border-main); }
+  .activity-bar { background: var(--bg-activity); border-right-color: var(--border-main); }
+  .side-panel { background: var(--bg-panel); border-right-color: var(--border-main); }
+  .chat-area { background: var(--bg-body); }
+  .messages { background: var(--bg-body); }
+  .input-area { background: var(--bg-panel); border-top-color: var(--border-main); }
+  .input-row textarea { background: var(--bg-input); border-color: var(--border-input); color: var(--text-primary); }
+  .input-row textarea:focus { border-color: var(--accent); }
+  .message.user { background: var(--bg-msg-user); border-color: var(--accent); }
+  .message.assistant { background: var(--bg-msg-assistant); border-color: var(--border-subtle); }
+  .message.system { background: var(--bg-panel); border-color: var(--border-main); color: var(--text-muted); }
+  .btn { background: var(--accent); }
+  .btn:hover { background: var(--accent-light); }
+  .btn.secondary { background: var(--border-main); color: var(--text-secondary); }
+  .btn.secondary:hover { background: #3a3a4a; }
+  .session-item:hover { background: var(--bg-hover); }
+  .session-item.active { background: var(--bg-card); border-left-color: var(--accent); }
+  .session-item .session-name { color: var(--text-secondary); }
+  .side-panel { border-right-color: var(--border-main); }
+  .activity-btn:hover { background: var(--bg-hover); }
+  .activity-btn.active { color: var(--accent-light); background: var(--bg-hover); }
+  .header-right .username { color: var(--text-header-accent); }
+  .panel-header .title { color: var(--text-muted); }
+  .tool-calls-summary { color: var(--accent-light); }
+  .tool-call-card { background: var(--bg-activity); border-color: var(--border-main); }
+  .tool-call-card .card-hdr { background: var(--bg-activity); }
+  .msg-content th { background: var(--bg-card); color: var(--accent-light); }
+  .msg-content td { background: var(--bg-activity); }
+  .msg-content tr:hover td { background: var(--bg-hover); }
+  .msg-content blockquote { border-left-color: var(--accent); }
+  .msg-content pre { background: var(--bg-activity); border-color: var(--border-main); }
+  .msg-content code { background: var(--bg-card); color: #f0c060; }
+  .msg-content a { color: var(--accent-light); }
+  .msg-content h1, .msg-content h2, .msg-content h3, .msg-content h4 { color: var(--accent-light); }
+  .data-view { background: var(--bg-body); }
+  .data-toolbar { background: var(--bg-panel); border-bottom-color: var(--border-main); }
+  .data-toolbar .tb-btn { background: var(--bg-card); border-color: var(--border-subtle); color: var(--text-secondary); }
+  .data-toolbar .tb-btn:hover { background: var(--border-main); border-color: var(--accent); }
+  .data-toolbar .tb-btn.add { background: #1a2a3a; border-color: var(--accent); color: var(--accent); }
+  .data-grid thead th { background: var(--bg-card); color: var(--accent-light); border-right-color: var(--border-main); border-bottom-color: var(--border-subtle); }
+  .data-grid tbody td { border-right-color: var(--bg-hover); border-bottom-color: var(--bg-hover); color: var(--text-secondary); }
+  .data-grid tbody tr:hover td { background: var(--bg-hover); }
+  .data-grid tbody tr.selected td { background: var(--bg-card) !important; }
+  .data-grid tbody td.row-num:hover { color: var(--accent-light); background: var(--bg-hover); }
+  .data-grid tbody td.editing { background: var(--bg-body); border-color: var(--accent); }
+  .data-grid tbody td.editing input,
+  .data-grid tbody td.editing textarea { background: var(--bg-body); color: var(--text-primary); }
+  .sheet-tabs { background: var(--bg-sheet); border-top-color: var(--border-main); }
+  .sheet-tab:hover { background: var(--bg-panel); }
+  .sheet-tab.active { color: var(--accent-light); background: var(--bg-card); border-bottom-color: var(--accent); }
+  .data-statusbar { background: var(--bg-sheet); border-top-color: var(--bg-hover); color: var(--text-dim); }
+  .data-toolbar .tb-title { color: var(--accent-light); }
+  .data-toolbar .tb-btn.danger:hover { background: #2a1a1a; border-color: #e74c3c; color: #ff6b6b; }
+  .data-toolbar .tb-btn.add { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
+  .data-toolbar .tb-btn.add:hover { background: var(--accent); color: #fff; }
+  .data-grid thead th.row-num-hdr { color: var(--text-dim); }
+  .data-grid tbody td.row-num { color: var(--text-dim); }
+  .data-grid tbody td.null-value { color: var(--text-dim); }
+  .scrollbar::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); }
+  .scrollbar::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+  .modal { background: var(--bg-card); border-color: var(--border-subtle); }
+  .modal h2 { color: var(--accent-light); }
+  .modal textarea { background: var(--bg-body); border-color: var(--border-subtle); color: var(--text-primary); }
+  .modal textarea:focus { border-color: var(--accent); }
+  .form-group input { background: var(--bg-body); border-color: var(--border-subtle); color: var(--text-primary); }
+  .form-group input:focus { border-color: var(--accent); }
+  .project-group { background: var(--bg-panel); border-color: var(--border-main); }
+  .project-group .project-hdr { background: var(--bg-hover); border-bottom-color: var(--border-main); }
+  .project-group .project-hdr .proj-name { color: var(--accent-light); }
+  .tree-node:hover { background: var(--accent-glow); }
+
+  /* ---- 可选主题 ---- */
+
+  /* 极光绿 */
+  body[data-theme="aurora"] {
+    --bg-body: #0d1412;
+    --bg-panel: #111a17;
+    --bg-card: #162420;
+    --bg-header: linear-gradient(135deg, #162420, #1e322a);
+    --bg-input: #162420;
+    --bg-activity: #0c1210;
+    --bg-msg-user: #1a3a2a;
+    --bg-msg-assistant: #162420;
+    --bg-hover: #162420;
+    --bg-toolbar: #111a17;
+    --bg-sheet: #0c1210;
+    --border-main: #253830;
+    --border-subtle: #2a4035;
+    --border-input: #2a4035;
+    --accent: #2ecc71;
+    --accent-light: #58d68d;
+    --accent-glow: rgba(46,204,113,0.08);
+    --text-primary: #d0ddd5;
+    --text-secondary: #bfccbf;
+    --text-muted: #7a8a7e;
+    --text-dim: #556655;
+    --text-header-accent: #58d68d;
+    --scrollbar-thumb: #2a4035;
+    --scrollbar-thumb-hover: #3a5545;
+  }
+
+  /* 暗金橙 */
+  body[data-theme="amber"] {
+    --bg-body: #14120f;
+    --bg-panel: #1a1612;
+    --bg-card: #242018;
+    --bg-header: linear-gradient(135deg, #242018, #322a1e);
+    --bg-input: #242018;
+    --bg-activity: #100e0c;
+    --bg-msg-user: #3a2a1a;
+    --bg-msg-assistant: #242018;
+    --bg-hover: #242018;
+    --bg-toolbar: #1a1612;
+    --bg-sheet: #100e0c;
+    --border-main: #383020;
+    --border-subtle: #403828;
+    --border-input: #403828;
+    --accent: #e67e22;
+    --accent-light: #f0a050;
+    --accent-glow: rgba(230,126,34,0.08);
+    --text-primary: #ddd5cc;
+    --text-secondary: #ccc0b0;
+    --text-muted: #8a8070;
+    --text-dim: #665a4a;
+    --text-header-accent: #f0a050;
+    --scrollbar-thumb: #403828;
+    --scrollbar-thumb-hover: #554838;
+  }
+
+  /* 墨紫 */
+  body[data-theme="violet"] {
+    --bg-body: #120f17;
+    --bg-panel: #181420;
+    --bg-card: #201a2e;
+    --bg-header: linear-gradient(135deg, #201a2e, #2e2240);
+    --bg-input: #201a2e;
+    --bg-activity: #0f0c14;
+    --bg-msg-user: #2e1a4a;
+    --bg-msg-assistant: #201a2e;
+    --bg-hover: #201a2e;
+    --bg-toolbar: #181420;
+    --bg-sheet: #0f0c14;
+    --border-main: #302840;
+    --border-subtle: #383048;
+    --border-input: #383048;
+    --accent: #9b59b6;
+    --accent-light: #bb8fce;
+    --accent-glow: rgba(155,89,182,0.08);
+    --text-primary: #d8d0e0;
+    --text-secondary: #c8bcd0;
+    --text-muted: #8878a0;
+    --text-dim: #665580;
+    --text-header-accent: #bb8fce;
+    --scrollbar-thumb: #383048;
+    --scrollbar-thumb-hover: #484058;
+  }
+
+  /* 经典暗灰 */
+  body[data-theme="slate"] {
+    --bg-body: #18191d;
+    --bg-panel: #1e1f24;
+    --bg-card: #25262c;
+    --bg-header: linear-gradient(135deg, #25262c, #2f3038);
+    --bg-input: #25262c;
+    --bg-activity: #141519;
+    --bg-msg-user: #2d2e3a;
+    --bg-msg-assistant: #25262c;
+    --bg-hover: #25262c;
+    --bg-toolbar: #1e1f24;
+    --bg-sheet: #141519;
+    --border-main: #353740;
+    --border-subtle: #3e3f48;
+    --border-input: #3e3f48;
+    --accent: #7289da;
+    --accent-light: #9babf0;
+    --accent-glow: rgba(114,137,218,0.08);
+    --text-primary: #dcddde;
+    --text-secondary: #c8c9cc;
+    --text-muted: #888990;
+    --text-dim: #686970;
+    --text-header-accent: #9babf0;
+    --scrollbar-thumb: #3e3f48;
+    --scrollbar-thumb-hover: #505158;
+  }
+
+  /* 浅色 */
+  body[data-theme="light"] {
+    --bg-body: #ffffff;
+    --bg-panel: #f5f5f5;
+    --bg-card: #ebebeb;
+    --bg-header: linear-gradient(135deg, #f0f0f0, #e8e8e8);
+    --bg-input: #f0f0f0;
+    --bg-activity: #e8e8e8;
+    --bg-msg-user: #e8f0fe;
+    --bg-msg-assistant: #f5f5f5;
+    --bg-hover: #e8e8e8;
+    --bg-toolbar: #f5f5f5;
+    --bg-sheet: #e0e0e0;
+    --border-main: #d0d0d0;
+    --border-subtle: #d8d8d8;
+    --border-input: #ccc;
+    --accent: #4a6cf7;
+    --accent-light: #6b8af8;
+    --accent-glow: rgba(74,108,247,0.06);
+    --text-primary: #1a1a1a;
+    --text-secondary: #333;
+    --text-muted: #777;
+    --text-dim: #999;
+    --text-header-accent: #4a6cf7;
+    --scrollbar-thumb: #c0c0c0;
+    --scrollbar-thumb-hover: #a0a0a0;
+  }
+
+  /* ========== Excel 风格数据表格视图 ========== */
+  .data-view {
+    flex: 1; display: none; flex-direction: column; min-width: 0;
+  }
+  .data-view.active { display: flex; }
+
+  /* 工具栏 */
+  .data-toolbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 16px;
+    flex-shrink: 0; height: 44px;
+  }
+  .data-toolbar .tb-title {
+    font-size: 13px; font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .data-toolbar .tb-title .tb-icon { font-size: 16px; }
+  .data-toolbar .tb-spacer { flex: 1; }
+  .data-toolbar .tb-btn {
+    padding: 4px 12px; border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px; display: flex; align-items: center; gap: 4px;
+    transition: all 0.15s;
+  }
+
+  /* 表格容器 */
+  .data-grid-wrap {
+    flex: 1; overflow: auto; position: relative;
+  }
+  .data-grid {
+    width: 100%; border-collapse: collapse;
+    font-size: 12px; font-family: 'Consolas', 'Courier New', 'Microsoft YaHei', monospace;
+    table-layout: auto;
+  }
+  .data-grid thead {
+    position: sticky; top: 0; z-index: 10;
+  }
+  .data-grid thead th {
+    padding: 8px 12px; text-align: left; font-weight: 600;
+    white-space: nowrap; user-select: none;
+    min-width: 80px; max-width: 400px;
+  }
+  .data-grid thead th.col-type {
+    font-size: 9px; font-weight: 400;
+    display: block;
+  }
+  .data-grid thead th.row-num-hdr {
+    width: 48px; min-width: 48px; max-width: 48px;
+    text-align: center; font-size: 10px;
+  }
+  .data-grid tbody td {
+    padding: 5px 12px;
+    white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; max-width: 400px;
+    cursor: pointer; transition: background 0.1s;
+  }
+  .data-grid tbody td.row-num {
+    width: 48px; min-width: 48px; max-width: 48px;
+    text-align: center; font-size: 10px;
+    cursor: pointer; user-select: none;
+  }
+  .data-grid tbody td.null-value {
+    font-style: italic; font-size: 11px;
+  }
+  /* 编辑态 */
+  .data-grid tbody td.editing {
+    padding: 0;
+  }
+  .data-grid tbody td.editing input,
+  .data-grid tbody td.editing textarea {
+    width: 100%; min-height: 30px;
+    border: none; outline: none;
+    font-size: 12px;
+    font-family: inherit; padding: 4px 10px;
+    resize: none;
+  }
+  .data-grid tbody td.saving {
+    opacity: 0.5; pointer-events: none;
+  }
+  .data-grid tbody td.saved-flash {
+    animation: saveFlash 0.6s ease-out;
+  }
+  @keyframes saveFlash {
+    0% { background: #1a3a2a; }
+    100% { background: transparent; }
+  }
+
+  /* Sheet 标签栏 */
+  .sheet-tabs {
+    display: flex; align-items: center;
+    background: #11131f; border-top: 1px solid #2a2a3a;
+    flex-shrink: 0; height: 36px; padding: 0 8px; gap: 2px;
+    overflow-x: auto;
+  }
+  .sheet-tab {
+    padding: 6px 14px; border: none; background: transparent;
+    color: #666; cursor: pointer; font-size: 12px;
+    border-radius: 4px 4px 0 0; white-space: nowrap;
+    display: flex; align-items: center; gap: 5px;
+    transition: all 0.15s; border-bottom: 2px solid transparent;
+    min-width: 0;
+  }
+  .sheet-tab:hover { color: #aaa; background: #141620; }
+  .sheet-tab.active {
+    color: #a29bfe; background: #1a1d2e;
+    border-bottom-color: #6c5ce7;
+  }
+  .sheet-tab .tab-count {
+    font-size: 10px; color: #555; background: #0f1117;
+    padding: 1px 6px; border-radius: 8px;
+  }
+  .sheet-tab.active .tab-count { color: #a29bfe; background: #0f1117; }
+
+  /* 状态栏 */
+  .data-statusbar {
+    display: flex; align-items: center; gap: 14px;
+    padding: 3px 16px; background: #11131f;
+    border-top: 1px solid #1a1d2e;
+    font-size: 11px; color: #555; flex-shrink: 0; height: 24px;
+  }
+  .data-statusbar .status-ok { color: #4ade80; }
+  .data-statusbar .status-dirty { color: #facc15; }
+
+  /* 新行提示 */
+  .data-grid tbody tr.new-row td {
+    background: #111a14; color: #4ade80; font-style: italic;
+  }
+
 </style>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/atom-one-dark.min.css">
@@ -411,7 +834,7 @@
     <button class="activity-btn active" id="actSessions" title="会话列表" onclick="switchPanel('sessions')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
     </button>
-    <button class="activity-btn" id="actProjects" title="项目概览" onclick="switchPanel('projects')">
+    <button class="activity-btn" id="actProjects" title="数据表格" onclick="switchPanel('data')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
     </button>
     <!-- 底部：设置齿轮 (VS Code 风格) -->
@@ -454,14 +877,48 @@
         </div>
       </div>
     </div>
-    <div class="input-area">
+    <div class="input-area" id="inputArea">
       <div class="input-row">
         <textarea id="messageInput" rows="1" placeholder="输入消息..." onkeydown="handleKeyDown(event)"></textarea>
-        <button class="btn" onclick="sendMessage()">
+        <button class="btn btn-send" id="btnSend" onclick="sendMessage()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
           发送
         </button>
+        <button class="btn-stop" id="btnStop" onclick="stopGeneration()" title="停止生成">
+          <span class="stop-icon"></span>
+          停止
+        </button>
       </div>
+    </div>
+  </div>
+
+  <!-- Excel 风格数据表格视图 -->
+  <div class="data-view" id="dataView">
+    <div class="data-toolbar">
+      <div class="tb-title">
+        <span class="tb-icon">📊</span>
+        <span id="tbTableName">数据表</span>
+      </div>
+      <div class="tb-spacer"></div>
+      <button class="tb-btn add" id="btnAddRow" onclick="addRow()" title="添加新行">
+        <span>➕</span> 添加行
+      </button>
+      <button class="tb-btn danger" id="btnDelRow" onclick="deleteRow()" title="删除选中行" disabled>
+        <span>🗑</span> 删除
+      </button>
+    </div>
+    <div class="data-grid-wrap scrollbar" id="dataGridWrap">
+      <table class="data-grid" id="dataGrid">
+        <thead id="dataGridHead"></thead>
+        <tbody id="dataGridBody"></tbody>
+      </table>
+    </div>
+    <div class="sheet-tabs" id="sheetTabs">
+      <span style="color:#444;font-size:11px;padding:0 8px;">加载中...</span>
+    </div>
+    <div class="data-statusbar">
+      <span id="statusMsg" class="status-ok">✓ 就绪</span>
+      <span id="statusCount"></span>
     </div>
   </div>
 </div>
@@ -513,6 +970,18 @@
       <input type="text" id="settingsModel" placeholder="deepseek-v4-flash"
              style="width:100%;padding:10px 12px;background:#0f1117;border:1px solid #333;border-radius:6px;color:#e0e0e0;font-size:14px;outline:none;">
     </div>
+    <div class="form-group" style="margin-bottom:14px;">
+      <label for="settingsTheme">🎨 主题配色</label>
+      <select id="settingsTheme"
+              style="width:100%;padding:10px 12px;background:#0f1117;border:1px solid #333;border-radius:6px;color:#e0e0e0;font-size:14px;outline:none;cursor:pointer;">
+        <option value="">🌊 深海 (默认)</option>
+        <option value="aurora">🌿 极光</option>
+        <option value="amber">🟠 暗金</option>
+        <option value="violet">🟣 墨紫</option>
+        <option value="slate">🩶 经典灰</option>
+        <option value="light">☀️ 浅色</option>
+      </select>
+    </div>
     <!-- 客户端节点状态 -->
     <div id="settingsNodes" style="margin-bottom:12px;">
       <div style="font-size:13px;color:#aaa;font-weight:500;margin-bottom:4px;">🖥️ 已连接设备</div>
@@ -553,10 +1022,27 @@ let currentPanel = 'sessions';
 function switchPanel(panel) {
   currentPanel = panel;
   document.getElementById('actSessions').classList.toggle('active', panel === 'sessions');
-  document.getElementById('actProjects').classList.toggle('active', panel === 'projects');
-  document.getElementById('panelSessions').style.display = panel === 'sessions' ? '' : 'none';
-  document.getElementById('panelProjects').style.display = panel === 'projects' ? '' : 'none';
-  if (panel === 'projects') refreshProjects();
+  document.getElementById('actProjects').classList.toggle('active', panel === 'projects' || panel === 'data');
+  // 会话/项目侧栏
+  const sidePanel = document.getElementById('sidePanel');
+  const chatArea = document.querySelector('.chat-area');
+  const dataView = document.getElementById('dataView');
+
+  if (panel === 'data') {
+    // 数据表格模式：隐藏侧栏和聊天，显示表格
+    sidePanel.style.display = 'none';
+    chatArea.style.display = 'none';
+    dataView.classList.add('active');
+    loadTableList();
+  } else {
+    // 聊天模式：显示侧栏和聊天，隐藏表格
+    dataView.classList.remove('active');
+    chatArea.style.display = '';
+    sidePanel.style.display = '';
+    document.getElementById('panelSessions').style.display = panel === 'sessions' ? '' : 'none';
+    document.getElementById('panelProjects').style.display = panel === 'projects' ? '' : 'none';
+    if (panel === 'projects') refreshProjects();
+  }
 }
 
 // ========== 多会话管理（服务端持久化，支持多端同步） ==========
@@ -732,11 +1218,15 @@ async function loadActiveSession() {
     }
 
     container.innerHTML = '';
+    let roundIndex = -1;
     data.messages.forEach(msg => {
+      if (msg.role === 'user') {
+        roundIndex++;
+      }
       if (msg.role === 'tool_exec') {
-        addToolExecToUI(msg.calls || []);
+        addToolExecToUI(msg.calls || [], roundIndex);
       } else {
-        addMessageToUI(msg.role, msg.content);
+        addMessageToUI(msg.role, msg.content, null, roundIndex);
       }
     });
     container.scrollTop = container.scrollHeight;
@@ -750,9 +1240,15 @@ async function loadActiveSession() {
   }
 }
 
-// 添加消息到 UI（支持工具调用卡片）
-function addMessageToUI(role, content, toolCalls) {
+// 添加消息到 UI（支持工具调用卡片、轮次索引、删除按钮）
+function addMessageToUI(role, content, toolCalls, roundIndex) {
   const container = document.getElementById('messages');
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message-wrapper ' + (role === 'user' ? 'user-msg' : 'assistant-msg');
+  if (roundIndex !== undefined && roundIndex !== null) {
+    wrapper.setAttribute('data-round', roundIndex);
+  }
+
   const div = document.createElement('div');
   div.className = 'message ' + role;
   // 消息内容包裹在 .msg-content 中，assistant 消息渲染 markdown
@@ -813,14 +1309,34 @@ function addMessageToUI(role, content, toolCalls) {
     div.appendChild(section);
   }
 
-  container.appendChild(div);
+  // 添加删除按钮
+  if (roundIndex !== undefined && roundIndex !== null) {
+    const delBtn = document.createElement('button');
+    delBtn.className = 'msg-delete-btn';
+    delBtn.innerHTML = '✕';
+    delBtn.title = '删除此轮对话';
+    delBtn.onclick = function(e) {
+      e.stopPropagation();
+      deleteMessageRound(roundIndex);
+    };
+    wrapper.appendChild(delBtn);
+  }
+
+  wrapper.appendChild(div);
+  container.appendChild(wrapper);
   div.scrollIntoView({ behavior: 'smooth' });
   return div;
 }
 
 // 为历史消息渲染工具执行记录（来自 api_get_session 返回的 tool_exec 消息）
-function addToolExecToUI(calls) {
+function addToolExecToUI(calls, roundIndex) {
   const container = document.getElementById('messages');
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message-wrapper assistant-msg';
+  if (roundIndex !== undefined && roundIndex !== null) {
+    wrapper.setAttribute('data-round', roundIndex);
+  }
+
   const div = document.createElement('div');
   div.className = 'message assistant';
   div.style.padding = '4px 10px';
@@ -868,12 +1384,30 @@ function addToolExecToUI(calls) {
   ts.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   div.appendChild(section);
   div.appendChild(ts);
-  container.appendChild(div);
+
+  // 添加删除按钮
+  if (roundIndex !== undefined && roundIndex !== null) {
+    const delBtn = document.createElement('button');
+    delBtn.className = 'msg-delete-btn';
+    delBtn.innerHTML = '✕';
+    delBtn.title = '删除此轮对话';
+    delBtn.onclick = function(e) {
+      e.stopPropagation();
+      deleteMessageRound(roundIndex);
+    };
+    wrapper.appendChild(delBtn);
+  }
+
+  wrapper.appendChild(div);
+  container.appendChild(wrapper);
   div.scrollIntoView({ behavior: 'smooth' });
   return div;
 }
 
 let sessionId = null; // 服务端 session_id，从 /chat 响应中获取
+let abortController = null; // 用于停止生成
+let currentStreamMsg = null; // 当前正在流式输出的消息 DOM 元素
+let currentRoundIndex = 0; // 当前加载会话时的消息轮次计数
 
 // ========== 发送消息 ==========
 function handleKeyDown(e) {
@@ -883,35 +1417,93 @@ function handleKeyDown(e) {
   }
 }
 
+function stopGeneration() {
+  if (abortController) {
+    abortController.abort();
+    abortController = null;
+  }
+}
+
 async function sendMessage() {
   const input = document.getElementById('messageInput');
   const text = input.value.trim();
   if (!text) return;
+
+  // 如果正在生成中，不允许发送
+  if (abortController) return;
 
   // 确保有活跃会话
   let activeId = getActiveSessionId();
   if (!activeId) {
     await createNewSession();
     activeId = getActiveSessionId();
-    if (!activeId) return; // 创建失败则退出
+    if (!activeId) return;
   }
 
-  addMessageToUI('user', text);
+  // 当前轮次 = 已有轮次中的最大索引 + 1
+  const allWrappers = document.querySelectorAll('#messages .message-wrapper[data-round]');
+  let maxRound = -1;
+  allWrappers.forEach(w => {
+    const r = parseInt(w.getAttribute('data-round'));
+    if (!isNaN(r) && r > maxRound) maxRound = r;
+  });
+  const roundIdx = maxRound + 1;
+
+  addMessageToUI('user', text, null, roundIdx);
   input.value = '';
   input.style.height = 'auto';
 
-  const loadingDiv = addMessageToUI('assistant', '思考中...');
+  // 创建 assistant 消息气泡（初始为空，流式填充）
+  const container = document.getElementById('messages');
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message-wrapper assistant-msg';
+  wrapper.setAttribute('data-round', roundIdx);
+  const div = document.createElement('div');
+  div.className = 'message assistant';
+  const contentDiv = document.createElement('div');
+  contentDiv.className = 'msg-content streaming-cursor';
+  contentDiv.innerHTML = '';
+  div.appendChild(contentDiv);
+  wrapper.appendChild(div);
+
+  // 添加删除按钮
+  const delBtn = document.createElement('button');
+  delBtn.className = 'msg-delete-btn';
+  delBtn.innerHTML = '✕';
+  delBtn.title = '删除此轮对话';
+  delBtn.onclick = function(e) {
+    e.stopPropagation();
+    deleteMessageRound(roundIdx);
+  };
+  wrapper.appendChild(delBtn);
+
+  container.appendChild(wrapper);
+  div.scrollIntoView({ behavior: 'smooth' });
+  currentStreamMsg = div;
+
+  // 进入生成状态
+  document.getElementById('inputArea').classList.add('generating');
+  input.disabled = true;
+
+  // 创建 AbortController
+  abortController = new AbortController();
+
+  let fullContent = '';
+  let toolCallsSection = null;
+  let toolCallsSummary = null;
+  let toolCallCards = [];
+  let receivedToolCalls = [];
 
   try {
-    // 使用服务端 session_id（优先）, 否则用本地 activeId
     const chatSessionId = sessionId || activeId;
-    const res = await fetch(SERVER_URL + '/chat', {
+    const res = await fetch(SERVER_URL + '/chat/stream', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + getToken()
       },
-      body: JSON.stringify({ message: text, session_id: chatSessionId })
+      body: JSON.stringify({ message: text, session_id: chatSessionId }),
+      signal: abortController.signal
     });
 
     if (res.status === 401) {
@@ -925,74 +1517,159 @@ async function sendMessage() {
       throw new Error('Server error (' + res.status + '): ' + errText);
     }
 
-    const data = await res.json();
-    sessionId = data.session_id;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-    // 如果本地 activeId 还没设置，用服务端返回的
-    if (!getActiveSessionId()) {
-      setActiveSessionId(data.session_id);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // 保留未完成的行
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const jsonStr = line.slice(6);
+        let event;
+        try { event = JSON.parse(jsonStr); } catch(e) { continue; }
+
+        switch (event.type) {
+          case 'token':
+            fullContent += event.content;
+            contentDiv.classList.remove('streaming-cursor');
+            contentDiv.innerHTML = renderMarkdown(fullContent);
+            contentDiv.classList.add('streaming-cursor');
+            div.scrollIntoView({ behavior: 'smooth' });
+            break;
+
+          case 'tool_start':
+            // 首次收到工具调用时创建工具区域
+            if (!toolCallsSection) {
+              toolCallsSection = document.createElement('div');
+              toolCallsSection.className = 'tool-calls-section';
+              toolCallsSummary = document.createElement('div');
+              toolCallsSummary.className = 'tool-calls-summary expanded';
+              toolCallsSummary.innerHTML = '<span class="arrow">▶</span> 正在调用工具...';
+              toolCallsSection.appendChild(toolCallsSummary);
+              div.appendChild(toolCallsSection);
+            }
+            // 清除旧的流式光标（工具阶段不显示文本光标）
+            contentDiv.classList.remove('streaming-cursor');
+            receivedToolCalls.push(event);
+            // 添加工具卡片（pending 状态）
+            const card = document.createElement('div');
+            card.className = 'tool-call-card expanded';
+            let argsPreview = event.args || '';
+            if (argsPreview.length > 80) argsPreview = argsPreview.slice(0, 80) + '…';
+            card.innerHTML =
+              '<div class="card-hdr">' +
+                '<span class="tag">⏳ ' + escapeHtml(event.name) + '</span>' +
+                '<span style="color:#666;font-size:10px;">' + escapeHtml(argsPreview) + '</span>' +
+              '</div>' +
+              '<div class="card-body">' +
+                '<div class="label">📥 参数</div>' +
+                '<div>' + escapeHtml(argsPreview || '(无)') + '</div>' +
+                '<div class="label" style="margin-top:4px;">📤 结果</div>' +
+                '<div class="tool-result">执行中...</div>' +
+              '</div>';
+            toolCallsSection.appendChild(card);
+            toolCallCards.push({ card: card, name: event.name });
+            div.scrollIntoView({ behavior: 'smooth' });
+            break;
+
+          case 'tool_end':
+            // 更新对应工具卡片的结果
+            for (const tc of toolCallCards) {
+              if (tc.name === event.name) {
+                const tagEl = tc.card.querySelector('.tag');
+                if (tagEl) tagEl.innerHTML = '🔧 ' + escapeHtml(event.name);
+                const resultEl = tc.card.querySelector('.tool-result');
+                if (resultEl) resultEl.textContent = event.result || '(空)';
+                break;
+              }
+            }
+            // 更新摘要
+            if (toolCallsSummary) {
+              toolCallsSummary.innerHTML = '<span class="arrow">▶</span> 调用了 ' + toolCallCards.length + ' 个工具';
+              toolCallsSummary.onclick = function() {
+                const cards = toolCallsSection.querySelectorAll('.tool-call-card');
+                const expanded = cards.length > 0 && cards[0].classList.contains('expanded');
+                cards.forEach(c => c.classList.toggle('expanded', !expanded));
+                toolCallsSummary.classList.toggle('expanded', !expanded);
+              };
+            }
+            break;
+
+          case 'done':
+            sessionId = event.session_id;
+            if (!getActiveSessionId()) {
+              setActiveSessionId(event.session_id);
+            }
+            contentDiv.classList.remove('streaming-cursor');
+            // 添加时间戳
+            const ts = document.createElement('div');
+            ts.className = 'timestamp';
+            ts.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            if (event.stopped) {
+              const badge = document.createElement('span');
+              badge.className = 'stopped-badge';
+              badge.textContent = ' ⏹ 已停止';
+              ts.appendChild(badge);
+            }
+            div.appendChild(ts);
+            break;
+
+          case 'error':
+            contentDiv.classList.remove('streaming-cursor');
+            if (!fullContent) {
+              contentDiv.innerHTML = renderMarkdown('**[错误]** ' + event.content);
+            } else {
+              const errDiv = document.createElement('div');
+              errDiv.style.cssText = 'color:#ff6b6b;font-size:12px;margin-top:6px;';
+              errDiv.textContent = '[错误] ' + event.content;
+              div.appendChild(errDiv);
+            }
+            break;
+        }
+      }
     }
-
-    // 渲染 markdown 到 .msg-content，替换"思考中..."
-    const msgContent = loadingDiv.querySelector('.msg-content');
-    if (msgContent) msgContent.innerHTML = renderMarkdown(data.reply);
-    // 更新已存在的时间戳，而非追加新的
-    const oldTs = loadingDiv.querySelector('.timestamp');
-    if (oldTs) oldTs.remove();
-    const ts = document.createElement('div');
-    ts.className = 'timestamp';
-    ts.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-    loadingDiv.appendChild(ts);
-
-    // 如果有工具调用记录，显示可折叠卡片
-    if (data.tool_calls && data.tool_calls.length > 0) {
-      const section = document.createElement('div');
-      section.className = 'tool-calls-section';
-
-      const summary = document.createElement('div');
-      summary.className = 'tool-calls-summary';
-      summary.innerHTML = '<span class="arrow">▶</span> 调用了 ' + data.tool_calls.length + ' 个工具';
-      summary.onclick = function() {
-        const cards = section.querySelectorAll('.tool-call-card');
-        const expanded = cards.length > 0 && cards[0].classList.contains('expanded');
-        cards.forEach(c => c.classList.toggle('expanded', !expanded));
-        summary.classList.toggle('expanded', !expanded);
-      };
-      section.appendChild(summary);
-
-      data.tool_calls.forEach(tc => {
-        const card = document.createElement('div');
-        card.className = 'tool-call-card';
-        let argsStr = '';
-        try { argsStr = JSON.stringify(tc.arguments || {}, null, 0); } catch(e) {}
-        if (argsStr.length > 80) argsStr = argsStr.slice(0, 80) + '…';
-        const resultStr = tc.result_preview || '';
-
-        card.innerHTML =
-          '<div class="card-hdr" onclick="var p=this.parentNode; p.classList.toggle(\'expanded\')">' +
-            '<span class="tag">🔧 ' + escapeHtml(tc.name) + '</span>' +
-            '<span style="color:#666;font-size:10px;">' + escapeHtml(argsStr) + '</span>' +
-          '</div>' +
-          '<div class="card-body">' +
-            '<div class="label">📥 参数</div>' +
-            '<div>' + escapeHtml(argsStr || '(无)') + '</div>' +
-            '<div class="label" style="margin-top:4px;">📤 结果</div>' +
-            '<div>' + escapeHtml(resultStr || '(空)') + '</div>' +
-          '</div>';
-        section.appendChild(card);
-      });
-      loadingDiv.appendChild(section);
-    }
-
-    // 刷新会话列表（显示最新的 last_message）
-    await renderSessionList();
-    // 始终刷新项目数据（AI 可能通过工具修改了项目/任务）
-    refreshProjects();
   } catch (err) {
-    const mc = loadingDiv.querySelector('.msg-content');
-    if (mc) mc.innerHTML = renderMarkdown('**[错误]** ' + err.message);
-    else loadingDiv.textContent = '[错误] ' + err.message;
-    console.error(err);
+    if (err.name === 'AbortError') {
+      // 用户主动停止
+      contentDiv.classList.remove('streaming-cursor');
+      if (fullContent) {
+        contentDiv.innerHTML = renderMarkdown(fullContent);
+      } else {
+        contentDiv.innerHTML = renderMarkdown('*[已取消]*');
+      }
+      const ts = document.createElement('div');
+      ts.className = 'timestamp';
+      const badge = document.createElement('span');
+      badge.className = 'stopped-badge';
+      badge.textContent = ' ⏹ 已停止';
+      ts.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      ts.appendChild(badge);
+      div.appendChild(ts);
+    } else {
+      const mc = div.querySelector('.msg-content');
+      if (mc) mc.innerHTML = renderMarkdown('**[错误]** ' + err.message);
+      else div.textContent = '[错误] ' + err.message;
+      console.error(err);
+    }
+  } finally {
+    // 确保光标动画被移除
+    if (contentDiv) contentDiv.classList.remove('streaming-cursor');
+    abortController = null;
+    currentStreamMsg = null;
+    document.getElementById('inputArea').classList.remove('generating');
+    input.disabled = false;
+    input.focus();
+
+    // 刷新会话列表和项目数据
+    await renderSessionList();
+    refreshProjects();
   }
 }
 
@@ -1158,6 +1835,334 @@ async function refreshProjects() {
   }
 }
 
+// ========== Excel 数据表格视图 ==========
+let currentTable = null;
+let tablesInfo = [];
+let selectedRowId = null;
+let currentTableColumns = [];
+
+// 从服务端加载表列表
+async function loadTableList() {
+  try {
+    const data = await api('GET', '/api/db/tables');
+    tablesInfo = data.tables || [];
+    renderSheetTabs();
+    if (tablesInfo.length > 0) {
+      await switchSheet(tablesInfo[0].name);
+    } else {
+      document.getElementById('dataGridHead').innerHTML = '';
+      document.getElementById('dataGridBody').innerHTML =
+        '<tr><td colspan="10" style="color:#555;text-align:center;padding:40px;">暂无数据表</td></tr>';
+    }
+  } catch(e) {
+    console.error('加载表列表失败:', e);
+    setStatus('加载失败: ' + e.message, false);
+  }
+}
+
+// 渲染底部 Sheet 标签页
+function renderSheetTabs() {
+  const container = document.getElementById('sheetTabs');
+  if (tablesInfo.length === 0) {
+    container.innerHTML = '<span style="color:#444;font-size:11px;padding:0 8px;">暂无数据表</span>';
+    return;
+  }
+  const icons = {'projects': '📋', 'tasks': '📝', 'schedule': '📅'};
+  let html = '';
+  tablesInfo.forEach(t => {
+    const active = t.name === currentTable ? ' active' : '';
+    const icon = icons[t.name] || '📄';
+    html += '<button class="sheet-tab' + active + '" onclick="switchSheet(\'' + t.name + '\')">' +
+      icon + ' ' + escapeHtml(t.name) +
+      '<span class="tab-count">' + t.row_count + '</span>' +
+    '</button>';
+  });
+  container.innerHTML = html;
+}
+
+// 切换 Sheet
+async function switchSheet(tableName) {
+  currentTable = tableName;
+  selectedRowId = null;
+  document.getElementById('btnDelRow').disabled = true;
+  document.getElementById('tbTableName').textContent = tableName;
+  renderSheetTabs();
+  await loadTableData(tableName);
+}
+
+// 加载表数据并渲染表格
+async function loadTableData(tableName) {
+  try {
+    setStatus('加载中...', true);
+    const data = await api('GET', '/api/db/tables/' + tableName + '/rows');
+    currentTableColumns = data.columns || [];
+    const rows = data.rows || [];
+    renderDataGrid(currentTableColumns, rows);
+    document.getElementById('statusCount').textContent = '共 ' + rows.length + ' 行';
+    setStatus('✓ 就绪', true);
+  } catch(e) {
+    console.error('加载表数据失败:', e);
+    setStatus('加载失败: ' + e.message, false);
+  }
+}
+
+// 渲染可编辑数据表格
+function renderDataGrid(columns, rows) {
+  const headEl = document.getElementById('dataGridHead');
+  const bodyEl = document.getElementById('dataGridBody');
+
+  // 表头
+  let headHtml = '<tr><th class="row-num-hdr">#</th>';
+  columns.forEach(col => {
+    headHtml += '<th>' + escapeHtml(col) + '<span class="col-type"></span></th>';
+  });
+  headHtml += '</tr>';
+  headEl.innerHTML = headHtml;
+
+  // 表体
+  if (rows.length === 0) {
+    bodyEl.innerHTML = '<tr><td colspan="' + (columns.length + 1) +
+      '" style="color:#555;text-align:center;padding:30px;">暂无数据，点击「添加行」新建</td></tr>';
+    return;
+  }
+
+  let bodyHtml = '';
+  rows.forEach(row => {
+    const rowId = row.id || row['id'];
+    const isSelected = rowId === selectedRowId ? ' selected' : '';
+    bodyHtml += '<tr class="' + isSelected + '" data-row-id="' + rowId + '">';
+    // 行号列
+    bodyHtml += '<td class="row-num" onclick="selectRow(' + rowId + ', event)">' + rowId + '</td>';
+    columns.forEach(col => {
+      const val = row[col];
+      const displayVal = val !== null && val !== undefined ? String(val) : '';
+      const nullClass = (val === null || val === undefined) ? ' null-value' : '';
+      const cellContent = (val === null || val === undefined) ? 'NULL' : escapeHtml(displayVal);
+      bodyHtml += '<td class="' + nullClass +
+        '" data-col="' + escapeHtml(col) +
+        '" data-row-id="' + rowId +
+        '" data-value="' + escapeHtml(displayVal) +
+        '" onclick="startEdit(this, \'' + col.replace(/'/g, "\\'") + '\', ' + rowId + ')">' +
+        cellContent + '</td>';
+    });
+    bodyHtml += '</tr>';
+  });
+  bodyEl.innerHTML = bodyHtml;
+}
+
+// 选中行
+function selectRow(rowId, event) {
+  event.stopPropagation();
+  selectedRowId = rowId;
+  document.getElementById('btnDelRow').disabled = false;
+  document.querySelectorAll('#dataGridBody tr').forEach(tr => {
+    tr.classList.toggle('selected', tr.getAttribute('data-row-id') === String(rowId));
+  });
+}
+
+// 开始编辑单元格
+function startEdit(td, colName, rowId) {
+  // 如果已在编辑中，先保存上一个
+  const editing = document.querySelector('.data-grid td.editing');
+  if (editing && editing !== td) {
+    finishEdit(editing);
+  }
+
+  if (td.classList.contains('editing')) return;
+
+  const currentVal = td.getAttribute('data-value') || '';
+  const isNull = td.classList.contains('null-value');
+
+  td.classList.add('editing');
+  td.innerHTML = '';
+
+  // 对于长文本使用 textarea，短文本使用 input
+  const useTextarea = currentVal.length > 50 || currentVal.indexOf('\n') >= 0;
+  let input;
+  if (useTextarea) {
+    input = document.createElement('textarea');
+    input.rows = Math.min(5, (currentVal.match(/\n/g) || []).length + 2);
+  } else {
+    input = document.createElement('input');
+    input.type = 'text';
+  }
+  input.value = isNull ? '' : currentVal;
+  td.appendChild(input);
+  input.focus();
+  input.select();
+
+  // 绑定保存事件
+  input.addEventListener('blur', function() { finishEdit(td); });
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      finishEdit(td);
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      input.value = isNull ? '' : currentVal;
+      finishEdit(td);
+    }
+  });
+}
+
+// 完成编辑并保存
+async function finishEdit(td) {
+  if (!td.classList.contains('editing')) return;
+
+  const input = td.querySelector('input, textarea');
+  const newValue = input ? input.value : td.textContent;
+  const colName = td.getAttribute('data-col');
+  const rowId = parseInt(td.getAttribute('data-row-id'));
+  const oldValue = td.getAttribute('data-value') || '';
+
+  // 值未改变，直接退出编辑态
+  if (newValue === oldValue) {
+    td.classList.remove('editing');
+    td.textContent = oldValue || (td.classList.contains('null-value') ? 'NULL' : '');
+    return;
+  }
+
+  // 保存中状态
+  td.classList.remove('editing');
+  td.classList.add('saving');
+  td.textContent = '保存中...';
+
+  try {
+    const payload = {};
+    payload[colName] = newValue;
+    await api('PUT', '/api/db/tables/' + currentTable + '/rows/' + rowId, payload);
+
+    // 保存成功
+    td.classList.remove('saving');
+    td.setAttribute('data-value', newValue);
+    if (newValue === '' || newValue === null) {
+      td.classList.add('null-value');
+      td.textContent = 'NULL';
+    } else {
+      td.classList.remove('null-value');
+      td.textContent = newValue;
+    }
+    td.classList.add('saved-flash');
+    setTimeout(function() { td.classList.remove('saved-flash'); }, 600);
+    setStatus('✓ 已保存 ' + colName, true);
+  } catch(e) {
+    td.classList.remove('saving');
+    td.textContent = oldValue;
+    setStatus('保存失败: ' + e.message, false);
+    console.error('保存失败:', e);
+  }
+}
+
+// 添加新行
+async function addRow() {
+  if (!currentTable) return;
+  const editing = document.querySelector('.data-grid td.editing');
+  if (editing) finishEdit(editing);
+
+  const input = prompt('请输入列名和值 (格式: 列名=值, 列名=值):\n例如: name=新项目, status=待启动');
+  if (!input) return;
+
+  const payload = {};
+  const pairs = input.split(',');
+  pairs.forEach(function(p) {
+    const idx = p.indexOf('=');
+    if (idx > 0) {
+      payload[p.substring(0, idx).trim()] = p.substring(idx + 1).trim();
+    }
+  });
+
+  if (Object.keys(payload).length === 0) {
+    alert('未提供有效数据');
+    return;
+  }
+
+  try {
+    setStatus('添加中...', true);
+    await api('POST', '/api/db/tables/' + currentTable + '/rows', payload);
+    await loadTableData(currentTable);
+    await refreshTableInfo();
+    setStatus('✓ 行已添加', true);
+  } catch(e) {
+    setStatus('添加失败: ' + e.message, false);
+    console.error('添加行失败:', e);
+  }
+}
+
+// 删除选中行
+async function deleteRow() {
+  if (!currentTable || !selectedRowId) return;
+  if (!confirm('确定删除行 #' + selectedRowId + ' 吗？该操作不可撤销。')) return;
+
+  try {
+    setStatus('删除中...', true);
+    await api('DELETE', '/api/db/tables/' + currentTable + '/rows/' + selectedRowId);
+    selectedRowId = null;
+    document.getElementById('btnDelRow').disabled = true;
+    await loadTableData(currentTable);
+    await refreshTableInfo();
+    setStatus('✓ 行已删除', true);
+  } catch(e) {
+    setStatus('删除失败: ' + e.message, false);
+    console.error('删除行失败:', e);
+  }
+}
+
+// 刷新表信息（行数）
+async function refreshTableInfo() {
+  try {
+    const data = await api('GET', '/api/db/tables');
+    tablesInfo = data.tables || [];
+    renderSheetTabs();
+  } catch(e) {}
+}
+
+// 设置状态栏消息
+function setStatus(msg, ok) {
+  const el = document.getElementById('statusMsg');
+  el.textContent = msg;
+  el.className = ok ? 'status-ok' : 'status-dirty';
+}
+
+// ========== 主题管理 ==========
+function getTheme() { return localStorage.getItem('zeroagent_theme') || ''; }
+function setTheme(theme) {
+  localStorage.setItem('zeroagent_theme', theme);
+  document.body.setAttribute('data-theme', theme);
+  const sel = document.getElementById('settingsTheme');
+  if (sel) sel.value = theme;
+}
+function initTheme() {
+  const theme = getTheme();
+  if (theme) document.body.setAttribute('data-theme', theme);
+}
+
+// ========== 删除消息轮次 ==========
+async function deleteMessageRound(roundIndex) {
+  const activeId = getActiveSessionId();
+  if (!activeId) return;
+
+  if (!confirm('确定删除此轮对话吗？该操作不可撤销。')) return;
+
+  // 如果正在流式输出，先停止
+  if (abortController) {
+    abortController.abort();
+    abortController = null;
+  }
+  // 恢复输入状态
+  document.getElementById('inputArea').classList.remove('generating');
+  document.getElementById('messageInput').disabled = false;
+
+  try {
+    await api('DELETE', '/api/sessions/' + activeId + '/messages/' + roundIndex);
+    await loadActiveSession();
+    await renderSessionList();
+  } catch(e) {
+    console.error('删除消息失败:', e);
+    alert('删除失败: ' + e.message);
+  }
+}
+
 function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
@@ -1238,6 +2243,7 @@ async function openSettings() {
   } catch(e) {
     console.error('加载设置失败:', e);
   }
+  document.getElementById('settingsTheme').value = getTheme();
   refreshNodes();
 }
 
@@ -1284,6 +2290,10 @@ async function saveSettings() {
     if (apiKey && !apiKey.startsWith('*')) body.api_key = apiKey;
     if (baseUrl) body.base_url = baseUrl;
     if (model) body.model = model;
+
+    // 保存主题
+    const theme = document.getElementById('settingsTheme').value;
+    setTheme(theme);
 
     const data = await api('PUT', '/api/settings', body);
     msgEl.style.display = 'block';
@@ -1373,6 +2383,14 @@ window.onload = async function() {
     await loadActiveSession();
   }
 
+  initTheme();
+  // 主题选择器实时预览
+  const themeSel = document.getElementById('settingsTheme');
+  if (themeSel) {
+    themeSel.addEventListener('change', function() {
+      document.body.setAttribute('data-theme', this.value);
+    });
+  }
   setTimeout(refreshProjects, 500);
 };
 </script>
