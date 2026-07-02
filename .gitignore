@@ -19,3 +19,4 @@ data/users.json
 client/client_log.txt
 token.txt
 client/auto_client.py
+debug_logs/

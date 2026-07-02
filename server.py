@@ -56,6 +56,8 @@ DEFAULT_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com
 DEFAULT_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 HOST = os.environ.get("SERVER_HOST", "0.0.0.0")
 PORT = int(os.environ.get("SERVER_PORT", "8010"))
+DEBUG_MODE = False  # --debug 命令行参数开启
+DEBUG_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_logs")
 
 # 用户设置存储目录
 SETTINGS_DIR = os.path.join(os.path.dirname(__file__) or ".", "data", "settings")
@@ -324,6 +326,87 @@ def _delete_session_from_disk(username: str, session_id: str):
     if session_id in all_sessions:
         del all_sessions[session_id]
         _save_user_sessions_to_disk(username, all_sessions)
+
+def _write_debug_log(username: str, session_id: str, user_message: str,
+                     rounds: list[dict], stopped: bool = False):
+    """DEBUG 模式：将一次对话完整记录写入 .log 文件。"""
+    if not DEBUG_MODE:
+        return
+    try:
+        os.makedirs(DEBUG_LOG_DIR, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_user = username.replace("/", "_").replace("\\", "_")
+        filename = f"{ts}_{safe_user}_{session_id[:8]}.log"
+        filepath = os.path.join(DEBUG_LOG_DIR, filename)
+
+        lines = []
+        lines.append("=" * 72)
+        lines.append(f" ZeroAgent Debug Log")
+        lines.append(f" 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(f" 用户: {username}")
+        lines.append(f" 会话: {session_id}")
+        lines.append(f" 模型: {_get_user_model(username)}")
+        lines.append("=" * 72)
+        lines.append("")
+
+        lines.append("─" * 60)
+        lines.append(f" [USER INPUT]")
+        lines.append("─" * 60)
+        lines.append(user_message)
+        lines.append("")
+
+        total_tool_calls = 0
+        for ri, rd in enumerate(rounds):
+            lines.append("─" * 60)
+            lines.append(f" [ROUND {ri + 1}]")
+            lines.append("─" * 60)
+
+            # AI 文本回复
+            if rd.get("ai_text"):
+                lines.append("")
+                lines.append(f"  [AI RESPONSE]")
+                lines.append(f"  {rd['ai_text']}")
+                lines.append("")
+
+            # 工具调用
+            for ti, tc in enumerate(rd.get("tool_calls", [])):
+                total_tool_calls += 1
+                lines.append(f"  ┌─ [TOOL CALL #{ti + 1}] {tc['name']}")
+                lines.append(f"  │")
+                lines.append(f"  │  Arguments:")
+                try:
+                    args_obj = json.loads(tc.get("args_raw", "{}"))
+                    args_fmt = json.dumps(args_obj, ensure_ascii=False, indent=6)
+                    for arg_line in args_fmt.split("\n"):
+                        lines.append(f"  │    {arg_line}")
+                except Exception:
+                    lines.append(f"  │    {tc.get('args_raw', '(无)')}")
+                lines.append(f"  │")
+                lines.append(f"  │  Result:")
+                result = tc.get("result_full", tc.get("result_preview", ""))
+                for rline in result.split("\n"):
+                    lines.append(f"  │    {rline}")
+                lines.append(f"  └{''.join('─' for _ in range(min(58, len(result.split(chr(10))[0])+4) if result else 58))}")
+
+            lines.append("")
+
+        # 如果被停止（partial reply）
+        if stopped:
+            lines.append("  [⚠ 用户停止了生成]")
+            lines.append("")
+
+        lines.append("=" * 72)
+        lines.append(f" 对话结束 — {len(rounds)} 轮, {total_tool_calls} 次工具调用")
+        lines.append("=" * 72)
+        lines.append("")
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+
+        print(f"[DEBUG] 日志已保存: {filepath}")
+    except Exception as e:
+        print(f"[DEBUG] 写日志失败: {e}")
+
 
 # 注意：不再使用全局 client。每个请求根据用户设置创建。
 # 这样做是为了多用户隔离 —— 每人可以用自己的 API Key 和 Base URL。
@@ -863,6 +946,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
             round_count = 0
             all_tool_call_records = []
             full_reply = ""
+            debug_rounds = []  # DEBUG: 每轮对话数据
 
             while round_count < max_rounds:
                 round_count += 1
@@ -924,6 +1008,8 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
 
                 # 处理工具调用（本轮有 tool_calls）
                 if tool_calls_map and finish_reason == "tool_calls":
+                    # DEBUG: 记录本轮前的 all_tool_call_records 长度
+                    prev_tool_count = len(all_tool_call_records)
                     # 构造 assistant 消息（含 tool_calls）
                     assistant_tool_calls = []
                     for idx in sorted(tool_calls_map.keys()):
@@ -1001,9 +1087,10 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                     })
                     for idx in sorted(tool_calls_map.keys()):
                         tc = tool_calls_map[idx]
-                        # 按 idx 精确匹配，避免同名工具导致结果串位
+                        # 按 idx 精确匹配当前轮的工具结果
+                        # （idx 每轮从 0 开始，必须限制在本轮记录内）
                         result_content = ""
-                        for rec in all_tool_call_records:
+                        for rec in all_tool_call_records[prev_tool_count:]:
                             if rec.get("idx") == idx:
                                 result_content = rec.get("result_full", "")
                                 break
@@ -1019,6 +1106,21 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                         new_schemas, new_funcs = user_tools.load_user_tools_for_agent(user_id)
                         combined_tools = tools + new_schemas
                         combined_func_map = {**func_map, **new_funcs}
+
+                    # DEBUG: 记录本轮工具调用
+                    if DEBUG_MODE:
+                        round_calls = []
+                        for rec in all_tool_call_records[prev_tool_count:]:
+                            round_calls.append({
+                                "name": rec["name"],
+                                "args_raw": json.dumps(rec.get("arguments", {}), ensure_ascii=False),
+                                "result_full": rec.get("result_full", ""),
+                                "result_preview": rec.get("result_preview", ""),
+                            })
+                        debug_rounds.append({
+                            "ai_text": "".join(content_parts) if any(content_parts) else "",
+                            "tool_calls": round_calls,
+                        })
 
                     continue  # 下一轮
 
@@ -1037,11 +1139,20 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
 
                 _persist_session(session)
 
+                # DEBUG: 记录最终回复轮
+                if DEBUG_MODE:
+                    debug_rounds.append({"ai_text": reply_text, "tool_calls": []})
+                    _write_debug_log(user_id, session.session_id, req.message,
+                                     debug_rounds)
+
                 yield f"data: {json.dumps({'type': 'done', 'session_id': session.session_id, 'tool_calls': all_tool_call_records if all_tool_call_records else None}, ensure_ascii=False)}\n\n"
                 return
 
             # 达到最大轮数
             _persist_session(session)
+            if DEBUG_MODE:
+                _write_debug_log(user_id, session.session_id, req.message,
+                                 debug_rounds)
             yield f"data: {json.dumps({'type': 'error', 'content': f'达到最大工具调用轮数 ({max_rounds})，任务可能过于复杂。'}, ensure_ascii=False)}\n\n"
 
         except asyncio.CancelledError:
@@ -1049,11 +1160,19 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
             if full_reply:
                 session.messages.append({"role": "assistant", "content": full_reply})
                 _persist_session(session)
+            if DEBUG_MODE:
+                partial_text = full_reply or "(未完成)"
+                debug_rounds.append({"ai_text": partial_text, "tool_calls": []})
+                _write_debug_log(user_id, session.session_id, req.message,
+                                 debug_rounds, stopped=True)
             yield f"data: {json.dumps({'type': 'done', 'session_id': session.session_id, 'stopped': True}, ensure_ascii=False)}\n\n"
         except Exception as e:
             err_msg = f"{type(e).__name__}: {str(e)}"
             print(f"[ERROR] chat_stream: {err_msg}")
             print(traceback.format_exc())
+            if DEBUG_MODE:
+                _write_debug_log(user_id, session.session_id, req.message,
+                                 debug_rounds)
             yield f"data: {json.dumps({'type': 'error', 'content': err_msg}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
@@ -1787,6 +1906,12 @@ async def websocket_node_endpoint(websocket: WebSocket):
 #  Entry point
 # ============================================================
 if __name__ == "__main__":
+    import sys as _sys
+    if "--debug" in _sys.argv or "-d" in _sys.argv:
+        DEBUG_MODE = True
+        _sys.argv = [a for a in _sys.argv if a not in ("--debug", "-d")]
+        print("[DEBUG] 调试模式已开启 — 每次对话将保存到 debug_logs/ 目录")
+
     local_url = f"http://127.0.0.1:{PORT}"
     print("=" * 55)
     print("         ZeroAgent Cloud Brain")
@@ -1797,6 +1922,7 @@ if __name__ == "__main__":
     print(f"  API URL:  {DEFAULT_BASE_URL}")
     print(f"  API Key:  {'[OK] global default configured' if DEFAULT_API_KEY else '[!] need user config in settings'}")
     print(f"  Tools:    {len(tools)} loaded")
+    print(f"  Debug:    {'ON (logs → debug_logs/)' if DEBUG_MODE else 'OFF'}")
     print(f"  Blocked:  {', '.join(CLOUD_BLOCKED_TOOLS) if CLOUD_BLOCKED_TOOLS else '(none)'}")
     print("=" * 55)
     print(f"  Open {local_url} in browser to start")
