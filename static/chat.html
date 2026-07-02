@@ -682,6 +682,70 @@
     --scrollbar-thumb-hover: #a0a0a0;
   }
 
+  /* ---- 浅色主题硬编码覆盖：修复暗色值在浅色背景下不可见的问题 ---- */
+  body[data-theme="light"] .activity-btn { color: var(--text-dim); }
+  body[data-theme="light"] .activity-btn:hover { color: var(--text-muted); background: var(--bg-hover); }
+  body[data-theme="light"] .activity-btn .badge { background: var(--accent); }
+  body[data-theme="light"] .panel-header .panel-action { color: var(--text-dim); }
+  body[data-theme="light"] .panel-header .panel-action:hover { color: var(--accent-light); background: var(--bg-hover); }
+  body[data-theme="light"] .session-item.active { background: var(--bg-card); border-left: 3px solid var(--accent); }
+  body[data-theme="light"] .session-item .session-icon { color: var(--text-dim); }
+  body[data-theme="light"] .session-item .session-rename-input { background: var(--bg-body); border-color: var(--accent); color: var(--text-primary); }
+  body[data-theme="light"] .session-item .session-del { color: var(--text-dim); }
+  body[data-theme="light"] .session-item .session-del:hover { color: #e74c3c; background: #fde8e8; }
+  body[data-theme="light"] .project-item { background: var(--bg-card); border-color: var(--border-main); }
+  body[data-theme="light"] .project-item:hover { border-color: var(--accent); background: var(--bg-hover); }
+  body[data-theme="light"] .project-item .meta { color: var(--text-muted); }
+  body[data-theme="light"] .timestamp { color: var(--text-dim); }
+  body[data-theme="light"] .input-row textarea::placeholder { color: var(--text-dim); }
+  body[data-theme="light"] .btn.secondary:hover { background: var(--border-subtle); }
+  body[data-theme="light"] .msg-delete-btn { color: var(--text-dim); background: rgba(0,0,0,0.08); }
+  body[data-theme="light"] .msg-delete-btn:hover { color: #e74c3c; background: #fde8e8; }
+  body[data-theme="light"] .modal { background: var(--bg-card); border-color: var(--border-main); }
+  body[data-theme="light"] .modal h2 { color: var(--accent); }
+  body[data-theme="light"] .modal p { color: var(--text-muted); }
+  body[data-theme="light"] .modal textarea { background: var(--bg-body); border-color: var(--border-main); color: var(--text-primary); }
+  body[data-theme="light"] .modal textarea:focus { border-color: var(--accent); }
+  body[data-theme="light"] .modal .file-hint { color: var(--text-dim); }
+  body[data-theme="light"] .scrollbar::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); }
+  body[data-theme="light"] .scrollbar::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+  body[data-theme="light"] .msg-content h2 { border-bottom-color: var(--border-main); }
+  body[data-theme="light"] .msg-content blockquote { color: var(--text-muted); background: rgba(74,108,247,0.04); }
+  body[data-theme="light"] .msg-content code { color: #b85c00; background: var(--bg-card); }
+  body[data-theme="light"] .msg-content th,
+  body[data-theme="light"] .msg-content td { border-color: var(--border-main); }
+  body[data-theme="light"] .msg-content hr { border-top-color: var(--border-main); }
+  body[data-theme="light"] .msg-content strong { color: var(--text-primary); }
+  body[data-theme="light"] .msg-content pre { background: #f0f0f0; border-color: var(--border-main); }
+  body[data-theme="light"] .data-toolbar .tb-btn.add { background: #e8f0fe; border-color: var(--accent); color: var(--accent); }
+  body[data-theme="light"] .header { border-bottom-color: var(--border-main); }
+  body[data-theme="light"] .header-left { color: var(--text-muted); }
+  body[data-theme="light"] .activity-bar .node-count { color: var(--text-dim); }
+  body[data-theme="light"] .progress-bar { background: var(--border-main); }
+  body[data-theme="light"] .input-row textarea:focus { border-color: var(--accent); }
+  body[data-theme="light"] .tool-calls-summary:hover { color: var(--accent); }
+  body[data-theme="light"] .tool-call-card { background: var(--bg-card); border-color: var(--border-main); }
+  body[data-theme="light"] .tool-call-card .card-hdr { color: var(--accent); background: var(--bg-hover); }
+  body[data-theme="light"] .tool-call-card .card-hdr:hover { background: var(--border-subtle); }
+  body[data-theme="light"] .tool-call-card .card-hdr .tag { background: #e8f0fe; color: var(--accent); }
+  body[data-theme="light"] .tool-call-card .card-body { border-top-color: var(--border-main); color: var(--text-secondary); }
+  body[data-theme="light"] .tool-call-card .card-body .label { color: var(--text-dim); }
+  body[data-theme="light"] .tree-node .toggle { color: var(--text-dim); }
+  body[data-theme="light"] .tree-node .node-name { color: var(--text-secondary); }
+  body[data-theme="light"] .tree-node .node-badge.progress-bar-badge { background: #e8f0fe; color: var(--accent); }
+  body[data-theme="light"] .form-group label { color: var(--text-secondary); }
+  body[data-theme="light"] .form-group input { background: var(--bg-body); border-color: var(--border-main); color: var(--text-primary); }
+  body[data-theme="light"] .form-group input:focus { border-color: var(--accent); }
+  body[data-theme="light"] .form-group input::placeholder { color: var(--text-dim); }
+  body[data-theme="light"] .streaming-cursor::after { color: var(--accent); }
+  body[data-theme="light"] .msg-content { color: var(--text-primary); }
+  body[data-theme="light"] .msg-content h1,
+  body[data-theme="light"] .msg-content h2,
+  body[data-theme="light"] .msg-content h3,
+  body[data-theme="light"] .msg-content h4 { color: var(--text-primary); }
+  body[data-theme="light"] .message.system { background: #f0f0f0; border-color: var(--border-main); color: var(--text-muted); }
+  body[data-theme="light"] .hljs { background: #f5f5f5 !important; }
+
   /* ========== Excel 风格数据表格视图 ========== */
   .data-view {
     flex: 1; display: none; flex-direction: column; min-width: 0;
@@ -1575,14 +1639,15 @@ async function sendMessage() {
                 '<div class="tool-result">执行中...</div>' +
               '</div>';
             toolCallsSection.appendChild(card);
-            toolCallCards.push({ card: card, name: event.name });
+            toolCallCards.push({ card: card, name: event.name, callId: event.call_id });
             div.scrollIntoView({ behavior: 'smooth' });
             break;
 
           case 'tool_end':
-            // 更新对应工具卡片的结果
+            // 按 call_id 精确匹配工具卡片（避免同名工具互相覆盖）
             for (const tc of toolCallCards) {
-              if (tc.name === event.name) {
+              if (tc.callId === event.call_id && !tc.done) {
+                tc.done = true;
                 const tagEl = tc.card.querySelector('.tag');
                 if (tagEl) tagEl.innerHTML = '🔧 ' + escapeHtml(event.name);
                 const resultEl = tc.card.querySelector('.tool-result');

@@ -937,7 +937,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                             except json.JSONDecodeError:
                                 args = {}
 
-                        yield f"data: {json.dumps({'type': 'tool_start', 'name': name, 'args': args_raw}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'tool_start', 'name': name, 'args': args_raw, 'call_id': idx}, ensure_ascii=False)}\n\n"
 
                         ptools.set_current_user(user_id)
                         from tools import memory_tools as mt2
@@ -974,11 +974,14 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                             else:
                                 result = f"[ERROR] Unknown tool: {name}"
 
-                        result_preview = str(result)[:300]
-                        yield f"data: {json.dumps({'type': 'tool_end', 'name': name, 'result': result_preview}, ensure_ascii=False)}\n\n"
+                        result_str = str(result)
+                        result_preview = result_str[:300]
+                        yield f"data: {json.dumps({'type': 'tool_end', 'name': name, 'result': result_preview, 'call_id': idx}, ensure_ascii=False)}\n\n"
 
                         all_tool_call_records.append({
-                            "name": name, "arguments": args, "result_preview": result_preview,
+                            "idx": idx, "name": name, "arguments": args,
+                            "result_preview": result_preview,
+                            "result_full": result_str,
                         })
 
                         assistant_tool_calls.append({
@@ -998,12 +1001,11 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                     })
                     for idx in sorted(tool_calls_map.keys()):
                         tc = tool_calls_map[idx]
-                        name = tc["function"]["name"]
-                        # 找到对应的 result
+                        # 按 idx 精确匹配，避免同名工具导致结果串位
                         result_content = ""
                         for rec in all_tool_call_records:
-                            if rec["name"] == name:
-                                result_content = str(rec.get("result_preview", ""))
+                            if rec.get("idx") == idx:
+                                result_content = rec.get("result_full", "")
                                 break
                         session.messages.append({
                             "role": "tool",
@@ -1325,7 +1327,6 @@ def _get_display_columns(username: str, table: str) -> list[str]:
         elif comp_name not in display:
             display.append(comp_name)
 
-    return display
     return display
 
 
@@ -1762,18 +1763,14 @@ async def websocket_node_endpoint(websocket: WebSocket):
             "tool_count": len(tool_names),
         })
 
-        # --- 保持连接存活（通过 lock 保护 recv，防止与 _call_node_tool 并发）---
+        # --- 保持连接存活：定期检查节点是否仍在注册表中 ---
+        # 不发送应用层 ping/pong（会与 _call_node_tool 的 recv 冲突），
+        # 不持锁（避免阻塞工具调用）。
+        # 连接断开由 _call_node_tool 检测并通过 _cleanup_node 移除节点。
         while True:
-            lock = node_registry.get(connected_user, {}).get(node_name, {}).get("lock")
-            if not lock:
-                break  # 节点已被清理
-            async with lock:
-                try:
-                    msg = await asyncio.wait_for(websocket.receive_json(), timeout=30)
-                    if msg.get("type") == "ping":
-                        await websocket.send_json({"type": "pong"})
-                except asyncio.TimeoutError:
-                    pass  # 心跳超时，继续循环
+            await asyncio.sleep(30)
+            if connected_user not in node_registry or node_name not in node_registry.get(connected_user, {}):
+                break
 
     except asyncio.TimeoutError:
         print(f"[NODE] Handshake timeout")
