@@ -1468,8 +1468,8 @@ function addToolExecToUI(calls, roundIndex) {
   return div;
 }
 
-let sessionId = null; // 服务端 session_id，从 /chat 响应中获取
-let abortController = null; // 用于停止生成
+// 按会话存储 abortController，支持多会话并发（不同会话可各自独立停止/发送）
+let abortControllers = {};
 let currentStreamMsg = null; // 当前正在流式输出的消息 DOM 元素
 let currentRoundIndex = 0; // 当前加载会话时的消息轮次计数
 
@@ -1482,9 +1482,10 @@ function handleKeyDown(e) {
 }
 
 function stopGeneration() {
-  if (abortController) {
-    abortController.abort();
-    abortController = null;
+  const sid = getActiveSessionId();
+  if (sid && abortControllers[sid]) {
+    abortControllers[sid].abort();
+    delete abortControllers[sid];
   }
 }
 
@@ -1493,9 +1494,6 @@ async function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
 
-  // 如果正在生成中，不允许发送
-  if (abortController) return;
-
   // 确保有活跃会话
   let activeId = getActiveSessionId();
   if (!activeId) {
@@ -1503,6 +1501,9 @@ async function sendMessage() {
     activeId = getActiveSessionId();
     if (!activeId) return;
   }
+
+  // 如果此会话正在生成中，不允许重复发送
+  if (abortControllers[activeId]) return;
 
   // 当前轮次 = 已有轮次中的最大索引 + 1
   const allWrappers = document.querySelectorAll('#messages .message-wrapper[data-round]');
@@ -1549,8 +1550,9 @@ async function sendMessage() {
   document.getElementById('inputArea').classList.add('generating');
   input.disabled = true;
 
-  // 创建 AbortController
-  abortController = new AbortController();
+  // 创建此会话的 AbortController
+  const currentSessionId = getActiveSessionId();
+  abortControllers[currentSessionId] = new AbortController();
 
   let fullContent = '';
   let toolCallsSection = null;
@@ -1559,7 +1561,7 @@ async function sendMessage() {
   let receivedToolCalls = [];
 
   try {
-    const chatSessionId = sessionId || activeId;
+    const chatSessionId = getActiveSessionId();
     const res = await fetch(SERVER_URL + '/chat/stream', {
       method: 'POST',
       headers: {
@@ -1567,7 +1569,7 @@ async function sendMessage() {
         'Authorization': 'Bearer ' + getToken()
       },
       body: JSON.stringify({ message: text, session_id: chatSessionId }),
-      signal: abortController.signal
+      signal: abortControllers[currentSessionId].signal
     });
 
     if (res.status === 401) {
@@ -1668,7 +1670,7 @@ async function sendMessage() {
             break;
 
           case 'done':
-            sessionId = event.session_id;
+            // 只在没有任何活跃会话时设置（预防首次使用时的情况）
             if (!getActiveSessionId()) {
               setActiveSessionId(event.session_id);
             }
@@ -1726,7 +1728,7 @@ async function sendMessage() {
   } finally {
     // 确保光标动画被移除
     if (contentDiv) contentDiv.classList.remove('streaming-cursor');
-    abortController = null;
+    delete abortControllers[currentSessionId];
     currentStreamMsg = null;
     document.getElementById('inputArea').classList.remove('generating');
     input.disabled = false;
@@ -2209,10 +2211,10 @@ async function deleteMessageRound(roundIndex) {
 
   if (!confirm('确定删除此轮对话吗？该操作不可撤销。')) return;
 
-  // 如果正在流式输出，先停止
-  if (abortController) {
-    abortController.abort();
-    abortController = null;
+  // 如果此会话正在流式输出，先停止
+  if (activeId && abortControllers[activeId]) {
+    abortControllers[activeId].abort();
+    delete abortControllers[activeId];
   }
   // 恢复输入状态
   document.getElementById('inputArea').classList.remove('generating');
