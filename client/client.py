@@ -344,6 +344,96 @@ def _api_create_session(server_url: str, token: str, name: str) -> dict | None:
     except Exception:
         return None
 
+# ============================================================
+#  设置管理 — 从服务端同步 thinking_enabled 等设置
+# ============================================================
+def _api_get_settings(server_url: str, token: str) -> dict:
+    """从服务端获取用户设置。"""
+    try:
+        resp = requests.get(f"{server_url}/api/settings",
+                            headers={"Authorization": f"Bearer {token}"}, timeout=10)
+        return resp.json() if resp.ok else {}
+    except Exception:
+        return {}
+
+def _api_save_settings(server_url: str, token: str, updates: dict) -> bool:
+    """保存用户设置到服务端。"""
+    try:
+        resp = requests.put(f"{server_url}/api/settings", json=updates,
+                            headers={"Authorization": f"Bearer {token}"}, timeout=10)
+        return resp.ok
+    except Exception:
+        return False
+
+def _show_settings_ui(server_url: str, token: str):
+    """交互式设置界面，用户按数字选择要修改的设置项。"""
+    settings = _api_get_settings(server_url, token)
+    thinking = settings.get("thinking_enabled", True)  # 默认开启
+
+    print()
+    print(C_BOLD("  ⚙️  客户端设置"))
+    print(C_DIM("  ─" + "─" * 40))
+    print(f"    [1] 思考模式 (Thinking):  {C_GREEN('✓ 开启' if thinking else '✗ 关闭')}{_RS}")
+    print(f"    [2] 模型名称:              {_DM}{settings.get('model', '(默认)')}{_RS}")
+    print(f"    [3] API Base URL:          {_DM}{settings.get('base_url', '(默认)')}{_RS}")
+    print(f"    [0] 返回")
+    print(C_DIM("  ─" + "─" * 40))
+    print()
+
+    while True:
+        try:
+            choice = input(f"  {_C}请选择要修改的设置 >{_RS} ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+
+        if choice == "0":
+            return
+
+        if choice == "1":
+            current = "开启" if thinking else "关闭"
+            ans = input(f"    思考模式当前为 [{_Y}{current}{_RS}]，输入 {_G}y{_RS} 开启 / {_R}n{_RS} 关闭: ").strip().lower()
+            if ans in ("y", "yes", "是"):
+                thinking = True
+                _api_save_settings(server_url, token, {"thinking_enabled": True})
+                print(f"    {_G}✓ 思考模式已开启{_RS}")
+                print(f"    {_DM}(下次对话生效，AI 会先思考再回答){_RS}")
+            elif ans in ("n", "no", "否"):
+                thinking = False
+                _api_save_settings(server_url, token, {"thinking_enabled": False})
+                print(f"    {_Y}✓ 思考模式已关闭{_RS}")
+            else:
+                print(C_DIM("    未更改"))
+            print()
+            continue
+
+        if choice == "2":
+            current_model = settings.get("model", "(默认)")
+            new_model = input(f"    模型名称 [{_DM}{current_model}{_RS}]: ").strip()
+            if new_model:
+                _api_save_settings(server_url, token, {"model": new_model})
+                settings["model"] = new_model
+                print(f"    {_G}✓ 模型已更新为: {new_model}{_RS}")
+            else:
+                print(C_DIM("    未更改"))
+            print()
+            continue
+
+        if choice == "3":
+            current_url = settings.get("base_url", "(默认)")
+            new_url = input(f"    API Base URL [{_DM}{current_url}{_RS}]: ").strip()
+            if new_url:
+                _api_save_settings(server_url, token, {"base_url": new_url})
+                settings["base_url"] = new_url
+                print(f"    {_G}✓ Base URL 已更新{_RS}")
+            else:
+                print(C_DIM("    未更改"))
+            print()
+            continue
+
+        print(C_RED(f"    无效选项: {choice}，请输入 0-3{_RS}"))
+
+
 
 async def _sse_stream(server_url: str, token: str, session_id: str | None,
                       message: str):
@@ -456,7 +546,7 @@ async def _chat_console(server_url: str, token: str, ws_task: asyncio.Task):
     print()
     print(C_DIM("  ─" + "─" * 44))
     print(C_BOLD(f"  💬 开始对话 — 会话: {C_CYAN(chat_name)}"))
-    print(C_DIM(f"  输入消息与 AI 对话 | /undo 撤回 | /delete 删会话 | /sessions | /new | /exit"))
+    print(C_DIM(f"  输入消息与 AI 对话 | /undo 撤回 | /settings 设置 | /delete 删会话 | /sessions | /new | /exit"))
     print(C_DIM("  ─" + "─" * 44))
     print()
 
@@ -516,6 +606,10 @@ async def _chat_console(server_url: str, token: str, ws_task: asyncio.Task):
                         print(f"  {_G}✓{_RS} 已撤回最后一轮对话 (剩余 {msg_count} 轮)")
                     else:
                         print(C_RED("  撤回失败"))
+                continue
+
+            if cmd == "/settings":
+                _show_settings_ui(server_url, token)
                 continue
 
             if cmd == "/delete":
@@ -675,6 +769,14 @@ async def run_client(config: dict):
                 raise RuntimeError(f"工具注册失败: {reg_resp}")
 
             # ========== Step 3: 打印就绪信息 ==========
+            # 确保默认启用思考模式（首次连接时设置）
+            settings = _api_get_settings(server, token)
+            if "thinking_enabled" not in settings:
+                _api_save_settings(server, token, {"thinking_enabled": True})
+                thinking_default = True
+            else:
+                thinking_default = settings.get("thinking_enabled", True)
+
             print()
             print(C_GREEN("  ✓ 已连接到 AI 大脑！"))
             print(f"    用户: {C_CYAN(server_username)}")
@@ -683,6 +785,7 @@ async def run_client(config: dict):
             if work_root:
                 print(f"    目录: {C_YELLOW(work_root)}")
             print(f"    模式: {C_YELLOW('交互确认' if interactive else '自动执行')}")
+            print(f"    思考: {C_GREEN('开启' if thinking_default else '关闭')}{_RS}{_DM} (用 /settings 切换){_RS}")
 
             # ========== Step 4: 并发运行 WS 工具处理器 + 终端聊天 ==========
             async def _ws_loop():

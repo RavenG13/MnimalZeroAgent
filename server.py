@@ -100,7 +100,7 @@ def _get_user_client(username: str):
             "请点击左下角 ⚙️ 齿轮图标，填入你的 API Key。\n"
             "支持所有 OpenAI 兼容的服务商：DeepSeek / OpenAI / Ollama / vLLM / Groq 等。"
         )
-    return OpenAI(api_key=api_key, base_url=base_url), None
+    return OpenAI(api_key=api_key, base_url=base_url, timeout=120.0, max_retries=2), None
 
 
 def _get_user_async_client(username: str):
@@ -114,13 +114,19 @@ def _get_user_async_client(username: str):
             "请点击左下角 ⚙️ 齿轮图标，填入你的 API Key。\n"
             "支持所有 OpenAI 兼容的服务商：DeepSeek / OpenAI / Ollama / vLLM / Groq 等。"
         )
-    return AsyncOpenAI(api_key=api_key, base_url=base_url), None
+    return AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=120.0, max_retries=2), None
 
 
 def _get_user_model(username: str) -> str:
     """获取用户设置的模型名"""
     settings = _load_user_settings(username)
     return settings.get("model") or DEFAULT_MODEL
+
+
+def _get_user_thinking_enabled(username: str) -> bool:
+    """获取用户是否启用思考模式（DeepSeek thinking mode）"""
+    settings = _load_user_settings(username)
+    return settings.get("thinking_enabled", False)
 
 
 # ============================================================
@@ -773,19 +779,26 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
             call_messages = session.messages
 
             # 调用 AI（OpenAI SDK 是同步阻塞的，放入线程池避免卡住事件循环）
+            thinking_enabled = _get_user_thinking_enabled(user_id)
+            extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
             response = await asyncio.to_thread(
                 user_client.chat.completions.create,
                 model=user_model,
                 messages=call_messages,
                 tools=all_tools,
                 tool_choice="auto",
-                extra_body={"thinking": {"type": "disabled"}},
+                extra_body=extra_body,
             )
 
             msg = response.choices[0].message
 
             if not msg.tool_calls:
-                session.messages.append({"role": "assistant", "content": msg.content})
+                # thinking mode: saving reasoning_content（无工具调用时不需要保留在上下文中）
+                assistant_msg = {"role": "assistant", "content": msg.content}
+                # reasoning_content 保存在消息中以便前端展示，但按 DeepSeek 规则不需要传回 API
+                if thinking_enabled and hasattr(msg, 'reasoning_content') and msg.reasoning_content:
+                    assistant_msg["reasoning_content"] = msg.reasoning_content
+                session.messages.append(assistant_msg)
                 summary = f"User({user_id}) asked: {req.message}\nAI answered: {msg.content}"
                 save_func = combined_func_map.get("save_memory")
                 if save_func:
@@ -871,7 +884,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                 }
                 all_tool_call_records.append(tool_record)
 
-                session.messages.append({
+                assistant_msg = {
                     "role": "assistant",
                     "content": None,
                     "tool_calls": [{
@@ -882,7 +895,11 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                             "arguments": tool_call.function.arguments,
                         },
                     }],
-                })
+                }
+                # thinking mode + tool call: reasoning_content 必须保留在上下文中
+                if thinking_enabled and hasattr(msg, 'reasoning_content') and msg.reasoning_content:
+                    assistant_msg["reasoning_content"] = msg.reasoning_content
+                session.messages.append(assistant_msg)
                 session.messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
@@ -961,16 +978,19 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                 all_tools = combined_tools + client_schemas
 
                 # 使用流式调用 AI
+                thinking_enabled = _get_user_thinking_enabled(user_id)
+                extra_body_stream = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
                 stream = await async_client.chat.completions.create(
                     model=user_model,
                     messages=session.messages,
                     tools=all_tools,
                     tool_choice="auto",
                     stream=True,
-                    extra_body={"thinking": {"type": "disabled"}},
+                    extra_body=extra_body_stream,
                 )
 
                 content_parts = []
+                thinking_parts = []
                 tool_calls_map: dict[int, dict] = {}
                 finish_reason = None
 
@@ -981,6 +1001,11 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                     delta = chunk.choices[0].delta if chunk.choices else None
                     if not delta:
                         continue
+
+                    # 思考内容 → 实时推送给前端（thinking mode）
+                    if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                        thinking_parts.append(delta.reasoning_content)
+                        yield f"data: {json.dumps({'type': 'thinking', 'content': delta.reasoning_content}, ensure_ascii=False)}\n\n"
 
                     # 文本内容 → 实时推送给前端
                     if delta.content:
@@ -1080,11 +1105,16 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                         })
 
                     # 保存 assistant(tool_calls) + tool 消息到会话历史
-                    session.messages.append({
+                    reasoning_text = "".join(thinking_parts)
+                    assistant_msg_tc = {
                         "role": "assistant",
                         "content": None,
                         "tool_calls": assistant_tool_calls,
-                    })
+                    }
+                    # thinking mode + tool call: reasoning_content 必须保留在上下文中
+                    if thinking_enabled and reasoning_text:
+                        assistant_msg_tc["reasoning_content"] = reasoning_text
+                    session.messages.append(assistant_msg_tc)
                     for idx in sorted(tool_calls_map.keys()):
                         tc = tool_calls_map[idx]
                         # 按 idx 精确匹配当前轮的工具结果
@@ -1126,7 +1156,12 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
 
                 # 没有工具调用 → 这是最终回复
                 reply_text = "".join(content_parts)
-                session.messages.append({"role": "assistant", "content": reply_text})
+                reasoning_text = "".join(thinking_parts)
+                assistant_final_msg = {"role": "assistant", "content": reply_text}
+                # 无工具调用时 reasoning_content 不需要保留在上下文中，但存储以便展示
+                if thinking_enabled and reasoning_text:
+                    assistant_final_msg["reasoning_content"] = reasoning_text
+                session.messages.append(assistant_final_msg)
 
                 # 保存记忆
                 summary = f"User({user_id}) asked: {req.message}\nAI answered: {reply_text[:200]}"
@@ -1277,7 +1312,10 @@ async def api_get_session(session_id: str, username: str = Depends(get_current_u
         if m["role"] == "user":
             chat_messages.append({"role": "user", "content": m["content"]})
         elif m["role"] == "assistant" and m.get("content"):
-            chat_messages.append({"role": "assistant", "content": m["content"]})
+            item = {"role": "assistant", "content": m["content"]}
+            if m.get("reasoning_content"):
+                item["reasoning_content"] = m["reasoning_content"]
+            chat_messages.append(item)
         elif m["role"] == "assistant" and m.get("tool_calls"):
             tool_exec = {"role": "tool_exec", "calls": []}
             for tc in m["tool_calls"]:
@@ -1737,6 +1775,7 @@ async def api_get_settings(username: str = Depends(get_current_user)):
         "base_url": settings.get("base_url") or DEFAULT_BASE_URL,
         "model": settings.get("model") or DEFAULT_MODEL,
         "has_api_key": bool(raw_key),
+        "thinking_enabled": settings.get("thinking_enabled", False),
     }
 
 
@@ -1744,6 +1783,7 @@ class SettingsRequest(BaseModel):
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     model: Optional[str] = None
+    thinking_enabled: Optional[bool] = None
 
 
 @app.put("/api/settings")
@@ -1756,6 +1796,8 @@ async def api_save_settings(req: SettingsRequest, username: str = Depends(get_cu
         settings["base_url"] = req.base_url
     if req.model is not None:
         settings["model"] = req.model
+    if req.thinking_enabled is not None:
+        settings["thinking_enabled"] = req.thinking_enabled
     _save_user_settings(username, settings)
 
     # 验证配置是否可用
