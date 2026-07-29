@@ -142,6 +142,13 @@
     border-radius: 3px; padding: 2px 6px; color: #e0e0e0;
     font-size: 13px; outline: none;
   }
+  .session-item .session-edit {
+    width: 20px; height: 20px; border: none; background: transparent;
+    color: #555; cursor: pointer; border-radius: 3px; font-size: 12px;
+    display: none; align-items: center; justify-content: center;
+  }
+  .session-item:hover .session-edit { display: flex; }
+  .session-item .session-edit:hover { color: #a29bfe; background: #1a1d2e; }
   .session-item .session-del {
     width: 20px; height: 20px; border: none; background: transparent;
     color: #555; cursor: pointer; border-radius: 3px; font-size: 12px;
@@ -246,7 +253,7 @@
   /* 弹窗 */
   .modal-overlay { display: none; position: fixed; top:0;left:0;right:0;bottom:0; background:rgba(0,0,0,0.7); z-index:100; justify-content:center; align-items:center; }
   .modal-overlay.active { display: flex; }
-  .modal { background: #1a1d2e; border:1px solid #333; border-radius:14px; padding:20px; width:560px; max-width:90vw; max-height:80vh; display:flex; flex-direction:column; }
+  .modal { background: #1a1d2e; border:1px solid #333; border-radius:14px; padding:20px; width:560px; max-width:90vw; max-height:80vh; display:flex; flex-direction:column; overflow-y:auto; }
   .modal h2 { font-size:16px; margin-bottom:10px; color:#a29bfe; }
   .modal p { font-size:13px; color:#888; margin-bottom:12px; line-height:1.5; }
   .modal textarea { flex:1; background:#0f1117; border:1px solid #333; border-radius:6px; padding:10px; color:#e0e0e0; font-size:13px; font-family:'Consolas','Courier New',monospace; resize:vertical; min-height:150px; outline:none; }
@@ -691,6 +698,8 @@
   body[data-theme="light"] .session-item.active { background: var(--bg-card); border-left: 3px solid var(--accent); }
   body[data-theme="light"] .session-item .session-icon { color: var(--text-dim); }
   body[data-theme="light"] .session-item .session-rename-input { background: var(--bg-body); border-color: var(--accent); color: var(--text-primary); }
+  body[data-theme="light"] .session-item .session-edit { color: var(--text-dim); }
+  body[data-theme="light"] .session-item .session-edit:hover { color: var(--accent); background: var(--bg-hover); }
   body[data-theme="light"] .session-item .session-del { color: var(--text-dim); }
   body[data-theme="light"] .session-item .session-del:hover { color: #e74c3c; background: #fde8e8; }
   body[data-theme="light"] .project-item { background: var(--bg-card); border-color: var(--border-main); }
@@ -1105,8 +1114,8 @@
     </div>
     <!-- 客户端节点状态 -->
     <div id="settingsNodes" style="margin-bottom:12px;">
-      <div style="font-size:13px;color:#aaa;font-weight:500;margin-bottom:4px;">🖥️ 已连接设备</div>
-      <div id="settingsNodeList" style="font-size:12px;color:#555;">加载中...</div>
+      <div style="font-size:13px;color:#aaa;font-weight:500;margin-bottom:4px;">🖥️ 在线设备</div>
+      <div id="settingsNodeList" style="font-size:12px;color:#555;max-height:150px;overflow-y:auto;padding-right:4px;" class="scrollbar">加载中...</div>
     </div>
     <div id="settingsMsg" style="font-size:12px;padding:6px 10px;border-radius:4px;margin-bottom:10px;display:none;"></div>
     <div class="actions">
@@ -1230,11 +1239,15 @@ async function createNewSession() {
 
 // 重命名会话（服务端）
 async function renameSession(id, newName) {
+  const name = newName.trim();
+  if (!name) return;
   try {
-    await api('PUT', '/api/sessions/' + id, { name: newName.trim() || '未命名' });
+    await api('PUT', '/api/sessions/' + id, { name: name });
     await renderSessionList();
   } catch(e) {
     console.error('重命名失败:', e);
+    // 恢复显示
+    await renderSessionList();
   }
 }
 
@@ -1283,7 +1296,8 @@ async function renderSessionList() {
       html += `
         <div class="session-item ${isActive ? 'active' : ''}" onclick="switchSession('${s.session_id}')">
           <span class="session-icon">💬</span>
-          <span class="session-name" id="sname_${s.session_id}" ondblclick="startRename('${s.session_id}')">${escapeHtml(name)}</span>
+          <span class="session-name" id="sname_${s.session_id}">${escapeHtml(name)}</span>
+          <button class="session-edit" onclick="event.stopPropagation();startRename('${s.session_id}')" title="重命名">✎</button>
           <button class="session-del" onclick="event.stopPropagation();deleteSession('${s.session_id}')" title="删除">✕</button>
         </div>
       `;
@@ -1299,14 +1313,33 @@ async function renderSessionList() {
 function startRename(id) {
   const span = document.getElementById('sname_' + id);
   if (!span) return;
-  const currentName = span.textContent;
+  // 防止重复编辑
+  if (span.querySelector('input')) return;
+  const currentName = span.textContent.trim();
   const input = document.createElement('input');
   input.className = 'session-rename-input';
   input.value = currentName;
-  input.onblur = function() { renameSession(id, this.value); };
+  input.onblur = function() {
+    const newName = this.value.trim();
+    if (newName && newName !== currentName) {
+      renameSession(id, newName);
+    } else {
+      // 没改或为空，恢复原样
+      const parent = this.parentNode;
+      if (parent) {
+        this.replaceWith(span);
+      }
+    }
+  };
   input.onkeydown = function(e) {
-    if (e.key === 'Enter') { this.blur(); }
-    if (e.key === 'Escape') { this.value = currentName; this.blur(); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      this.blur();
+    }
+    if (e.key === 'Escape') {
+      this.value = currentName;
+      this.blur();
+    }
   };
   span.replaceWith(input);
   input.focus();
@@ -2425,8 +2458,14 @@ async function refreshNodes() {
       return;
     }
     let html = '';
-    data.nodes.forEach(n => {
-      const dot = n.online ? '<span style="color:#4ade80;">●</span>' : '<span style="color:#555;">○</span>';
+    // 只显示在线设备
+    const onlineNodes = data.nodes.filter(n => n.online);
+    if (onlineNodes.length === 0) {
+      listEl.innerHTML = '<span style="color:#444;">无设备连接。运行 <code>python client.py</code> 连接本机。</span>';
+      return;
+    }
+    onlineNodes.forEach(n => {
+      const dot = '<span style="color:#4ade80;">●</span>';
       const mode = n.interactive ? '确认' : '自动';
       const tools = n.tool_names.map(t => '<code style="font-size:10px;background:#1a1d2e;padding:1px 4px;border-radius:2px;">' + escapeHtml(t) + '</code>').join(' ');
       html +=
