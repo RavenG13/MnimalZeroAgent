@@ -1,4 +1,4 @@
-__pycache__/
+﻿__pycache__/
 *.pyc
 *.pyo
 .env
@@ -20,3 +20,10 @@ client/client_log.txt
 token.txt
 client/auto_client.py
 debug_logs/
+
+# C# / .NET 构建产物
+bin/
+obj/
+*.user
+*.suo
+".vs/"  
