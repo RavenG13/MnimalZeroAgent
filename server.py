@@ -45,6 +45,7 @@ from auth import register, login, verify_token
 from tools import project_tools as ptools
 from tools import user_tools
 from tools import file_storage
+from tools import doc_tools
 from tools import scheduler as task_scheduler
 
 # ============================================================
@@ -744,6 +745,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
         from tools import memory_tools as mt
         mt.set_current_user(user_id)
         user_tools.set_current_user(user_id)   # 让 create_tool 知道操作的是哪个用户
+        doc_tools.set_current_user(user_id)    # 在线文档用户隔离
         ptools._init_db(user_id)
 
         user_tools_schemas, user_tools_funcs = user_tools.load_user_tools_for_agent(user_id)
@@ -834,6 +836,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                 from tools import memory_tools as mt2
                 mt2.set_current_user(user_id)
                 user_tools.set_current_user(user_id)
+                doc_tools.set_current_user(user_id)
 
                 print(f"[TOOL CALL] {name}({json.dumps(args, ensure_ascii=False)})")
 
@@ -864,6 +867,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                                 from tools import memory_tools as _mt
                                 _mt.set_current_user(username)
                                 user_tools.set_current_user(username)
+                                doc_tools.set_current_user(username)
                                 return fn(**kw)
                             result = await asyncio.wait_for(
                                 asyncio.to_thread(_run_with_user, tool_func, user_id, **args),
@@ -953,6 +957,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
             from tools import memory_tools as mt
             mt.set_current_user(user_id)
             user_tools.set_current_user(user_id)
+            doc_tools.set_current_user(user_id)
             ptools._init_db(user_id)
 
             user_tools_schemas, user_tools_funcs = user_tools.load_user_tools_for_agent(user_id)
@@ -1063,6 +1068,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                         from tools import memory_tools as mt2
                         mt2.set_current_user(user_id)
                         user_tools.set_current_user(user_id)
+                        doc_tools.set_current_user(user_id)
 
                         # 工具路由
                         if "__" in name and name.split("__", 1)[0] in node_registry.get(user_id, {}):
@@ -1082,6 +1088,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                                         from tools import memory_tools as _mt
                                         _mt.set_current_user(uname)
                                         user_tools.set_current_user(uname)
+                                        doc_tools.set_current_user(uname)
                                         return fn(**kw)
                                     result = await asyncio.wait_for(
                                         asyncio.to_thread(_run_with_user, tool_func, user_id, **args),
