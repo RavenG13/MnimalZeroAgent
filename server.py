@@ -719,6 +719,15 @@ async def root():
     return HTMLResponse("<h1>ZeroAgent</h1><p>Login page missing.</p>")
 
 
+@app.get("/m")
+async def mobile_root():
+    """手机端页面入口"""
+    m_path = os.path.join(static_dir, "m.html")
+    if os.path.isfile(m_path):
+        return FileResponse(m_path)
+    return HTMLResponse("<h1>ZeroAgent Mobile</h1><p>m.html missing.</p>")
+
+
 @app.get("/api/me")
 async def api_me(username: str = Depends(get_current_user)):
     return {"username": username}

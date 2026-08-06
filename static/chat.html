@@ -842,6 +842,86 @@
     100% { background: transparent; }
   }
 
+  /* ========== 在线文档视图 ========== */
+  .doc-view {
+    flex: 1; display: none; flex-direction: column; min-width: 0;
+  }
+  .doc-view.active { display: flex; }
+  .doc-toolbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 16px;
+    flex-shrink: 0; height: 44px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border-main);
+  }
+  .doc-toolbar .doc-title {
+    font-size: 13px; font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+    color: var(--accent-light);
+  }
+  .doc-toolbar .doc-spacer { flex: 1; }
+  .doc-toolbar .doc-status {
+    font-size: 11px; color: var(--text-dim);
+  }
+  .doc-toolbar .doc-status.saved { color: #4ade80; }
+  .doc-toolbar .doc-status.dirty { color: #facc15; }
+  .doc-editor-wrap {
+    flex: 1; display: flex; min-height: 0;
+  }
+  .doc-editor-pane {
+    flex: 1; display: flex; flex-direction: column; min-width: 0;
+    border-right: 1px solid var(--border-main);
+  }
+  .doc-pane-label {
+    padding: 4px 12px; font-size: 10px; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 1px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border-main);
+    flex-shrink: 0;
+  }
+  .doc-editor-pane textarea {
+    flex: 1; resize: none; border: none; outline: none;
+    background: var(--bg-body); color: var(--text-primary);
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 13px; line-height: 1.6;
+    padding: 12px 16px;
+  }
+  .doc-preview-pane {
+    flex: 1; display: flex; flex-direction: column; min-width: 0;
+  }
+  .doc-preview-content {
+    flex: 1; overflow-y: auto; padding: 16px 20px;
+  }
+  .doc-empty {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    color: var(--text-dim); font-size: 13px; gap: 8px;
+    height: 100%;
+  }
+  /* 文档列表项 */
+  .doc-item {
+    display: flex; align-items: center;
+    padding: 8px 10px; border-radius: 6px;
+    cursor: pointer; margin-bottom: 2px; gap: 8px;
+    transition: all 0.15s;
+  }
+  .doc-item:hover { background: var(--bg-hover); }
+  .doc-item.active { background: var(--bg-card); border-left: 3px solid var(--accent); }
+  .doc-item .doc-icon { font-size: 14px; color: var(--text-dim); flex-shrink: 0; }
+  .doc-item .doc-name {
+    flex: 1; font-size: 13px; color: var(--text-secondary);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .doc-item .doc-del {
+    width: 20px; height: 20px; border: none; background: transparent;
+    color: var(--text-dim); cursor: pointer; border-radius: 3px; font-size: 12px;
+    display: none; align-items: center; justify-content: center;
+  }
+  .doc-item:hover .doc-del { display: flex; }
+  .doc-item .doc-del:hover { color: #ff6b6b; background: #2a1a1a; }
+  body[data-theme="light"] .doc-item .doc-del { color: var(--text-dim); }
+  body[data-theme="light"] .doc-item .doc-del:hover { color: #e74c3c; background: #fde8e8; }
+
   /* Sheet 标签栏 */
   .sheet-tabs {
     display: flex; align-items: center;
@@ -958,6 +1038,9 @@
     <button class="activity-btn" id="actProjects" title="数据表格" onclick="switchPanel('data')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
     </button>
+    <button class="activity-btn" id="actDocs" title="在线文档" onclick="switchPanel('docs')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+    </button>
     <!-- 底部：设置齿轮 (VS Code 风格) -->
     <div class="activity-bar-bottom">
       <button class="activity-btn" id="actSettings" title="API 设置" onclick="openSettings()">
@@ -983,6 +1066,16 @@
         <button class="panel-action" onclick="openImportModal()" title="导入CSV">↑</button>
       </div>
       <div class="panel-body scrollbar" id="projectList">
+        <div style="color:#555;text-align:center;padding:20px;font-size:12px;">加载中...</div>
+      </div>
+    </div>
+    <!-- 文档面板 -->
+    <div id="panelDocs" style="display:none;">
+      <div class="panel-header">
+        <span class="title">在线文档</span>
+        <button class="panel-action" onclick="createNewDoc()" title="新建文档">+</button>
+      </div>
+      <div class="panel-body scrollbar" id="docList">
         <div style="color:#555;text-align:center;padding:20px;font-size:12px;">加载中...</div>
       </div>
     </div>
@@ -1040,6 +1133,33 @@
     <div class="data-statusbar">
       <span id="statusMsg" class="status-ok">✓ 就绪</span>
       <span id="statusCount"></span>
+    </div>
+  </div>
+
+  <!-- 在线文档视图 -->
+  <div class="doc-view" id="docView">
+    <div class="doc-toolbar">
+      <div class="doc-title">
+        <span class="tb-icon">📝</span>
+        <span id="docFileName">未选择文档</span>
+      </div>
+      <div class="doc-spacer"></div>
+      <span class="doc-status" id="docStatus"></span>
+      <button class="tb-btn add" onclick="saveDoc()" title="保存文档 (Ctrl+S)">
+        <span>💾</span> 保存
+      </button>
+    </div>
+    <div class="doc-editor-wrap">
+      <div class="doc-editor-pane">
+        <div class="doc-pane-label">✏️ 编辑 (Markdown / 文本)</div>
+        <textarea id="docEditor" placeholder="在此输入内容..." oninput="onDocEdit()"></textarea>
+      </div>
+      <div class="doc-preview-pane">
+        <div class="doc-pane-label">👁 预览</div>
+        <div class="doc-preview-content msg-content" id="docPreview">
+          <div class="doc-empty">👈 从左侧选择文档，或点击上方 + 新建</div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1153,24 +1273,39 @@ function switchPanel(panel) {
   currentPanel = panel;
   document.getElementById('actSessions').classList.toggle('active', panel === 'sessions');
   document.getElementById('actProjects').classList.toggle('active', panel === 'projects' || panel === 'data');
-  // 会话/项目侧栏
+  document.getElementById('actDocs').classList.toggle('active', panel === 'docs');
+  // 会话/项目/文档侧栏
   const sidePanel = document.getElementById('sidePanel');
   const chatArea = document.querySelector('.chat-area');
   const dataView = document.getElementById('dataView');
+  const docView = document.getElementById('docView');
 
   if (panel === 'data') {
     // 数据表格模式：隐藏侧栏和聊天，显示表格
     sidePanel.style.display = 'none';
     chatArea.style.display = 'none';
     dataView.classList.add('active');
+    docView.classList.remove('active');
     loadTableList();
-  } else {
-    // 聊天模式：显示侧栏和聊天，隐藏表格
+  } else if (panel === 'docs') {
+    // 文档模式：显示文档侧栏 + 编辑区
+    sidePanel.style.display = '';
+    chatArea.style.display = 'none';
     dataView.classList.remove('active');
+    docView.classList.add('active');
+    document.getElementById('panelSessions').style.display = 'none';
+    document.getElementById('panelProjects').style.display = 'none';
+    document.getElementById('panelDocs').style.display = '';
+    loadDocList();
+  } else {
+    // 聊天模式：显示侧栏和聊天，隐藏表格/文档
+    dataView.classList.remove('active');
+    docView.classList.remove('active');
     chatArea.style.display = '';
     sidePanel.style.display = '';
     document.getElementById('panelSessions').style.display = panel === 'sessions' ? '' : 'none';
     document.getElementById('panelProjects').style.display = panel === 'projects' ? '' : 'none';
+    document.getElementById('panelDocs').style.display = 'none';
     if (panel === 'projects') refreshProjects();
   }
 }
@@ -2407,6 +2542,146 @@ function renderMarkdown(text) {
   // 降级：纯文本转义
   return escapeHtml(text).replace(/\n/g, '<br>');
 }
+
+// ========== 在线文档功能 ==========
+let currentDocPath = null;
+let docSaveTimer = null;
+let docDirty = false;
+
+// 加载文档列表
+async function loadDocList() {
+  const container = document.getElementById('docList');
+  try {
+    const data = await api('GET', '/api/files?path=docs');
+    const items = (data.items || []).filter(i => i.type === 'file' && /\.(md|txt|markdown)$/i.test(i.name));
+    if (items.length === 0) {
+      container.innerHTML = '<div style="color:#555;text-align:center;padding:20px;font-size:12px;">暂无文档<br>点击 + 新建</div>';
+      return;
+    }
+    let html = '';
+    items.forEach(item => {
+      const active = currentDocPath === item.path ? ' active' : '';
+      html += `
+        <div class="doc-item${active}" onclick="openDoc('${item.path}')">
+          <span class="doc-icon">📄</span>
+          <span class="doc-name">${escapeHtml(item.name)}</span>
+          <button class="doc-del" onclick="event.stopPropagation();deleteDoc('${item.path}')" title="删除">✕</button>
+        </div>`;
+    });
+    container.innerHTML = html;
+  } catch(e) {
+    console.error('加载文档列表失败:', e);
+    container.innerHTML = '<div style="color:#ff6b6b;text-align:center;padding:20px;font-size:12px;">加载失败</div>';
+  }
+}
+
+// 新建文档
+async function createNewDoc() {
+  const name = prompt('请输入文档名称 (不含扩展名):');
+  if (!name) return;
+  const safeName = name.trim().replace(/[\\/:*?"<>|]/g, '_');
+  const filename = safeName + '.md';
+  const path = 'docs/' + filename;
+  try {
+    const content = '# ' + safeName + '\n\n';
+    await api('POST', '/api/files/save', { path, content });
+    await loadDocList();
+    await openDoc(path);
+  } catch(e) {
+    alert('创建文档失败: ' + e.message);
+  }
+}
+
+// 打开文档
+async function openDoc(path) {
+  currentDocPath = path;
+  document.getElementById('docEditor').value = '';
+  document.getElementById('docPreview').innerHTML = '';
+  const status = document.getElementById('docStatus');
+  status.textContent = '加载中...';
+  status.className = 'doc-status';
+  document.getElementById('docFileName').textContent = path.split('/').pop();
+  try {
+    const data = await api('GET', '/api/files/read?path=' + encodeURIComponent(path));
+    const content = data.content || '';
+    document.getElementById('docEditor').value = content;
+    renderDocPreview(content);
+    status.textContent = '已保存 ✓';
+    status.className = 'doc-status saved';
+    docDirty = false;
+    await loadDocList();
+  } catch(e) {
+    status.textContent = '加载失败';
+    status.className = 'doc-status dirty';
+  }
+}
+
+// 渲染预览
+function renderDocPreview(text) {
+  const preview = document.getElementById('docPreview');
+  const isMd = currentDocPath && /\.md$/i.test(currentDocPath);
+  if (isMd) {
+    preview.innerHTML = renderMarkdown(text);
+  } else {
+    preview.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
+  }
+}
+
+// 编辑器输入 → 自动保存（防抖 1s）
+function onDocEdit() {
+  docDirty = true;
+  const status = document.getElementById('docStatus');
+  status.textContent = '未保存...';
+  status.className = 'doc-status dirty';
+  renderDocPreview(document.getElementById('docEditor').value);
+  clearTimeout(docSaveTimer);
+  docSaveTimer = setTimeout(saveDoc, 1000);
+}
+
+// 保存文档
+async function saveDoc() {
+  if (!currentDocPath || !docDirty) return;
+  const status = document.getElementById('docStatus');
+  status.textContent = '保存中...';
+  status.className = 'doc-status dirty';
+  try {
+    const content = document.getElementById('docEditor').value;
+    await api('POST', '/api/files/save', { path: currentDocPath, content });
+    status.textContent = '已保存 ✓ ' + new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'});
+    status.className = 'doc-status saved';
+    docDirty = false;
+    await loadDocList();
+  } catch(e) {
+    status.textContent = '保存失败: ' + e.message;
+    status.className = 'doc-status dirty';
+  }
+}
+
+// 删除文档
+async function deleteDoc(path) {
+  if (!confirm('确定删除文档「' + path + '」吗？')) return;
+  try {
+    await api('DELETE', '/api/files/delete?path=' + encodeURIComponent(path));
+    if (currentDocPath === path) {
+      currentDocPath = null;
+      document.getElementById('docEditor').value = '';
+      document.getElementById('docPreview').innerHTML = '<div class="doc-empty">👈 从左侧选择文档，或点击上方 + 新建</div>';
+      document.getElementById('docFileName').textContent = '未选择文档';
+      document.getElementById('docStatus').textContent = '';
+    }
+    await loadDocList();
+  } catch(e) {
+    alert('删除失败: ' + e.message);
+  }
+}
+
+// Ctrl+S 保存
+document.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    if (currentDocPath) saveDoc();
+  }
+});
 
 // ========== CSV导入 ==========
 function openImportModal() {
