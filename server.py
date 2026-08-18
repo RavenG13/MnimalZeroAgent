@@ -46,6 +46,7 @@ from tools import project_tools as ptools
 from tools import user_tools
 from tools import file_storage
 from tools import doc_tools
+from tools import calendar_tools
 from tools import scheduler as task_scheduler
 
 # ============================================================
@@ -746,6 +747,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
         mt.set_current_user(user_id)
         user_tools.set_current_user(user_id)   # 让 create_tool 知道操作的是哪个用户
         doc_tools.set_current_user(user_id)    # 在线文档用户隔离
+        calendar_tools.set_current_user(user_id)
         ptools._init_db(user_id)
 
         user_tools_schemas, user_tools_funcs = user_tools.load_user_tools_for_agent(user_id)
@@ -837,6 +839,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                 mt2.set_current_user(user_id)
                 user_tools.set_current_user(user_id)
                 doc_tools.set_current_user(user_id)
+                calendar_tools.set_current_user(user_id)
 
                 print(f"[TOOL CALL] {name}({json.dumps(args, ensure_ascii=False)})")
 
@@ -868,6 +871,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                                 _mt.set_current_user(username)
                                 user_tools.set_current_user(username)
                                 doc_tools.set_current_user(username)
+                                calendar_tools.set_current_user(username)
                                 return fn(**kw)
                             result = await asyncio.wait_for(
                                 asyncio.to_thread(_run_with_user, tool_func, user_id, **args),
@@ -958,6 +962,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
             mt.set_current_user(user_id)
             user_tools.set_current_user(user_id)
             doc_tools.set_current_user(user_id)
+            calendar_tools.set_current_user(user_id)
             ptools._init_db(user_id)
 
             user_tools_schemas, user_tools_funcs = user_tools.load_user_tools_for_agent(user_id)
@@ -1069,6 +1074,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                         mt2.set_current_user(user_id)
                         user_tools.set_current_user(user_id)
                         doc_tools.set_current_user(user_id)
+                        calendar_tools.set_current_user(user_id)
 
                         # 工具路由
                         if "__" in name and name.split("__", 1)[0] in node_registry.get(user_id, {}):
@@ -1089,6 +1095,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                                         _mt.set_current_user(uname)
                                         user_tools.set_current_user(uname)
                                         doc_tools.set_current_user(uname)
+                                        calendar_tools.set_current_user(uname)
                                         return fn(**kw)
                                     result = await asyncio.wait_for(
                                         asyncio.to_thread(_run_with_user, tool_func, user_id, **args),
@@ -1769,6 +1776,53 @@ async def api_add_scheduled_task(req: dict, username: str = Depends(get_current_
 @app.delete("/api/scheduler/tasks/{task_name}")
 async def api_remove_scheduled_task(task_name: str, username: str = Depends(get_current_user)):
     result = task_scheduler.remove_scheduled_task(username, task_name)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["message"])
+    return result
+
+
+# ============================================================
+#  Calendar API — 日历日程（周/月视图）
+# ============================================================
+
+@app.get("/api/calendar/events")
+async def api_calendar_events(start: str = "", end: str = "",
+                              username: str = Depends(get_current_user)):
+    """获取日期范围内的日程事件（供周/月日历视图）"""
+    calendar_tools.set_current_user(username)
+    if not start:
+        today = datetime.now().strftime("%Y-%m-%d")
+        start = today
+    events = calendar_tools.api_get_events(start, end or None, username)
+    return {"events": events, "start": start, "end": end}
+
+
+@app.post("/api/calendar/events")
+async def api_calendar_add(req: dict, username: str = Depends(get_current_user)):
+    """创建日程事件（拖选时间段创建）"""
+    calendar_tools.set_current_user(username)
+    result = calendar_tools.api_add_event(req, username)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
+
+@app.put("/api/calendar/events/{event_id}")
+async def api_calendar_update(event_id: int, req: dict,
+                              username: str = Depends(get_current_user)):
+    """更新日程事件（拖拽调整时间）"""
+    calendar_tools.set_current_user(username)
+    result = calendar_tools.api_update_event(event_id, req, username)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["message"])
+    return result
+
+
+@app.delete("/api/calendar/events/{event_id}")
+async def api_calendar_delete(event_id: int, username: str = Depends(get_current_user)):
+    """删除日程事件"""
+    calendar_tools.set_current_user(username)
+    result = calendar_tools.api_delete_event(event_id, username)
     if not result["success"]:
         raise HTTPException(status_code=404, detail=result["message"])
     return result

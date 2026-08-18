@@ -14,6 +14,7 @@ data/sessions/
 data/settings/
 data/nodes/
 data/user_tools/
+data/user_files/
 data/users.json
 .claude/
 client/client_log.txt
@@ -26,4 +27,4 @@ bin/
 obj/
 *.user
 *.suo
-".vs/"  
+.vs/

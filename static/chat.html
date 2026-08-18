@@ -842,6 +842,136 @@
     100% { background: transparent; }
   }
 
+  /* ========== 日历视图 ========== */
+  .cal-view {
+    flex: 1; display: none; flex-direction: column; min-width: 0;
+  }
+  .cal-view.active { display: flex; }
+  .cal-toolbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 16px; flex-shrink: 0; height: 44px;
+    background: var(--bg-panel); border-bottom: 1px solid var(--border-main);
+  }
+  .cal-nav-btn {
+    background: var(--bg-card); border: 1px solid var(--border-subtle);
+    color: var(--text-secondary); border-radius: 5px; padding: 4px 10px;
+    cursor: pointer; font-size: 13px; transition: all 0.15s;
+  }
+  .cal-nav-btn:hover { background: var(--border-main); border-color: var(--accent); }
+  .cal-title { font-size: 22px; font-weight: 600; color: var(--text-primary); margin-left: 4px; }
+  .cal-spacer { flex: 1; }
+  .cal-mode-switch { display: flex; border: 1px solid var(--border-subtle); border-radius: 6px; overflow: hidden; }
+  .cal-mode-btn {
+    background: transparent; border: none; color: var(--text-muted);
+    padding: 5px 14px; cursor: pointer; font-size: 13px; transition: all 0.15s;
+  }
+  .cal-mode-btn.active { background: var(--accent); color: #fff; }
+
+  /* ---- 月视图 ---- */
+  .cal-month-view {
+    flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: auto;
+    padding: 8px;
+  }
+  .cal-month-header {
+    display: grid; grid-template-columns: repeat(7, 1fr);
+    text-align: center; padding: 6px 0;
+    color: var(--text-muted); font-size: 16px; font-weight: 500;
+  }
+  .cal-month-grid {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; flex: 1;
+  }
+  .cal-day-cell {
+    background: var(--bg-card); border: 1px solid var(--border-main);
+    border-radius: 6px; min-height: 90px; padding: 4px; cursor: pointer;
+    display: flex; flex-direction: column; gap: 2px; transition: all 0.15s;
+    overflow: hidden;
+  }
+  .cal-day-cell:hover { border-color: var(--accent); }
+  .cal-day-cell.other-month { opacity: 0.35; }
+  .cal-day-cell.today { border-color: var(--accent); background: var(--accent-glow); }
+  .cal-day-num {
+    font-size: 18px; color: var(--text-muted); font-weight: 500;
+    width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+    border-radius: 50%; flex-shrink: 0;
+  }
+  .cal-day-cell.today .cal-day-num { background: var(--accent); color: #fff; }
+  .cal-day-events { display: flex; flex-direction: column; gap: 2px; overflow: hidden; flex: 1; }
+  .cal-mini-event {
+    font-size: 15px; padding: 3px 6px; border-radius: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    color: #fff; cursor: pointer;
+  }
+  .cal-mini-event:hover { filter: brightness(1.15); }
+
+  /* ---- 周视图（横轴日期 / 纵轴时间） ---- */
+  .cal-week-view {
+    flex: 1; display: flex; flex-direction: column; min-height: 0;
+    overflow: hidden;
+  }
+  .cal-week-header {
+    display: flex; border-bottom: 1px solid var(--border-main);
+    background: var(--bg-panel); flex-shrink: 0;
+  }
+  .cal-week-time-hdr { width: 58px; flex-shrink: 0; }
+  .cal-week-day-hdr {
+    flex: 1; text-align: center; padding: 6px 0; cursor: pointer;
+    color: var(--text-muted); font-size: 16px;
+    border-left: 1px solid var(--border-main);
+  }
+  .cal-week-day-hdr.today { color: var(--accent); font-weight: 600; }
+  .cal-week-day-hdr .dow { display: block; }
+  .cal-week-day-hdr .dom { display: block; font-size: 22px; font-weight: 600; margin-top: 2px; }
+
+  .cal-week-body {
+    flex: 1; display: flex; overflow-y: auto; position: relative;
+    min-height: 0;
+  }
+  .cal-week-time-axis {
+    width: 58px; flex-shrink: 0; position: relative;
+    border-right: 1px solid var(--border-main); background: var(--bg-panel);
+  }
+  .cal-time-label {
+    position: absolute; right: 6px; transform: translateY(-50%);
+    font-size: 16px; color: var(--text-dim); width: 42px; text-align: right;
+  }
+  .cal-week-grid-container {
+    flex: 1; display: flex; position: relative; min-width: 0;
+  }
+  .cal-week-day-col {
+    flex: 1; position: relative; border-left: 1px solid var(--border-main);
+    cursor: crosshair; min-width: 60px;
+  }
+  .cal-week-day-col.today { background: var(--accent-glow); }
+  .cal-hour-line {
+    position: absolute; left: 0; right: 0; height: 1px;
+    background: var(--border-main); opacity: 0.6;
+  }
+  .cal-hour-line.half { opacity: 0.3; }
+  .cal-week-event {
+    position: absolute; left: 2px; right: 2px; border-radius: 4px;
+    padding: 3px 6px; font-size: 14px; color: #fff; cursor: pointer;
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3); z-index: 2;
+  }
+  .cal-week-event:hover { filter: brightness(1.15); z-index: 3; }
+  /* 拖选区域 */
+  .cal-drag-select {
+    position: absolute; border-radius: 3px; pointer-events: none;
+    background: rgba(108,92,231,0.35); border: 1px solid var(--accent);
+    z-index: 5;
+  }
+  .cal-hint {
+    padding: 4px 16px; font-size: 16px; color: var(--text-dim);
+    background: var(--bg-panel); border-top: 1px solid var(--border-main); flex-shrink: 0;
+  }
+
+  /* 事件颜色 */
+  .ev-high { background: #e74c3c; }
+  .ev-mid { background: #f39c12; }
+  .ev-low { background: #2ecc71; }
+  .ev-default { background: #6c5ce7; }
+  body[data-theme="light"] .cal-drag-select { background: rgba(74,108,247,0.3); }
+
   /* ========== 在线文档视图 ========== */
   .doc-view {
     flex: 1; display: none; flex-direction: column; min-width: 0;
@@ -1038,6 +1168,9 @@
     <button class="activity-btn" id="actProjects" title="数据表格" onclick="switchPanel('data')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
     </button>
+    <button class="activity-btn" id="actCal" title="日历" onclick="switchPanel('calendar')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/></svg>
+    </button>
     <button class="activity-btn" id="actDocs" title="在线文档" onclick="switchPanel('docs')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
     </button>
@@ -1134,6 +1267,27 @@
       <span id="statusMsg" class="status-ok">✓ 就绪</span>
       <span id="statusCount"></span>
     </div>
+  </div>
+
+  <!-- 日历视图 -->
+  <div class="cal-view" id="calView">
+    <div class="cal-toolbar">
+      <button class="cal-nav-btn" onclick="calPrev()" title="上一页">‹</button>
+      <button class="cal-nav-btn" onclick="calToday()" title="回到今天">今天</button>
+      <button class="cal-nav-btn" onclick="calNext()" title="下一页">›</button>
+      <span class="cal-title" id="calTitle">--</span>
+      <div class="cal-spacer"></div>
+      <div class="cal-mode-switch">
+        <button class="cal-mode-btn active" id="calModeMonth" onclick="calSetMode('month')">月</button>
+        <button class="cal-mode-btn" id="calModeWeek" onclick="calSetMode('week')">周</button>
+      </div>
+    </div>
+    <!-- 月视图 -->
+    <div class="cal-month-view" id="calMonthView"></div>
+    <!-- 周视图（横轴日期 / 纵轴时间 / 可拖选） -->
+    <div class="cal-week-view" id="calWeekView" style="display:none;"></div>
+    <!-- 底部提示 -->
+    <div class="cal-hint" id="calHint"></div>
   </div>
 
   <!-- 在线文档视图 -->
@@ -1274,33 +1428,43 @@ function switchPanel(panel) {
   document.getElementById('actSessions').classList.toggle('active', panel === 'sessions');
   document.getElementById('actProjects').classList.toggle('active', panel === 'projects' || panel === 'data');
   document.getElementById('actDocs').classList.toggle('active', panel === 'docs');
+  document.getElementById('actCal').classList.toggle('active', panel === 'calendar');
   // 会话/项目/文档侧栏
   const sidePanel = document.getElementById('sidePanel');
   const chatArea = document.querySelector('.chat-area');
   const dataView = document.getElementById('dataView');
   const docView = document.getElementById('docView');
+  const calView = document.getElementById('calView');
 
   if (panel === 'data') {
-    // 数据表格模式：隐藏侧栏和聊天，显示表格
     sidePanel.style.display = 'none';
     chatArea.style.display = 'none';
     dataView.classList.add('active');
     docView.classList.remove('active');
+    calView.classList.remove('active');
     loadTableList();
   } else if (panel === 'docs') {
-    // 文档模式：显示文档侧栏 + 编辑区
     sidePanel.style.display = '';
     chatArea.style.display = 'none';
     dataView.classList.remove('active');
     docView.classList.add('active');
+    calView.classList.remove('active');
     document.getElementById('panelSessions').style.display = 'none';
     document.getElementById('panelProjects').style.display = 'none';
     document.getElementById('panelDocs').style.display = '';
     loadDocList();
-  } else {
-    // 聊天模式：显示侧栏和聊天，隐藏表格/文档
+  } else if (panel === 'calendar') {
+    // 日历模式：全屏日历（隐藏侧栏/聊天/表格/文档）
+    sidePanel.style.display = 'none';
+    chatArea.style.display = 'none';
     dataView.classList.remove('active');
     docView.classList.remove('active');
+    calView.classList.add('active');
+    calRender();
+  } else {
+    dataView.classList.remove('active');
+    docView.classList.remove('active');
+    calView.classList.remove('active');
     chatArea.style.display = '';
     sidePanel.style.display = '';
     document.getElementById('panelSessions').style.display = panel === 'sessions' ? '' : 'none';
@@ -2682,6 +2846,348 @@ document.addEventListener('keydown', function(e) {
     if (currentDocPath) saveDoc();
   }
 });
+
+// ========== 日历视图逻辑 ==========
+let calMode = 'month';      // 'month' | 'week'
+let calCursor = new Date(); // 当前显示的锚点日期
+let calEvents = [];         // 当前范围的日程事件
+const CAL_EVENT_COLORS = { '高': 'ev-high', '低': 'ev-low', '中': 'ev-mid' };
+const DOW_CN = ['日', '一', '二', '三', '四', '五', '六'];
+
+function calFmt(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function calParse(s) {
+  const parts = s.split('-');
+  return new Date(+parts[0], +parts[1] - 1, +parts[2]);
+}
+function calAddDays(d, n) {
+  const r = new Date(d); r.setDate(r.getDate() + n); return r;
+}
+function calEvColor(ev) {
+  return CAL_EVENT_COLORS[ev.priority] || 'ev-default';
+}
+function calEvTimeLabel(ev) {
+  const st = (ev.start_time || '').split(' ').pop();
+  const et = (ev.end_time || '').split(' ').pop();
+  if (st && et) return `${st}~${et}`;
+  if (st) return st;
+  return '全天';
+}
+
+// 当前显示范围（月 or 周）
+function calRange() {
+  if (calMode === 'month') {
+    const first = new Date(calCursor.getFullYear(), calCursor.getMonth(), 1);
+    const start = calAddDays(first, -first.getDay()); // 周日开始
+    const end = calAddDays(start, 41); // 6周
+    return { start, end };
+  } else {
+    const dow = calCursor.getDay();
+    const start = calAddDays(calCursor, -dow); // 周日开始
+    const end = calAddDays(start, 6);
+    return { start, end };
+  }
+}
+
+// 加载事件并渲染
+async function calRender() {
+  const { start, end } = calRange();
+  document.getElementById('calTitle').textContent = calTitleText();
+  try {
+    const data = await api('GET', '/api/calendar/events?start=' + calFmt(start) + '&end=' + calFmt(end));
+    calEvents = data.events || [];
+    if (calMode === 'month') calRenderMonth(start, end);
+    else calRenderWeek(start, end);
+    document.getElementById('calHint').textContent =
+      calMode === 'week' ? '💡 在时间格上按住拖动选择时间段，松开即可创建日程' : '';
+  } catch(e) {
+    console.error('加载日历失败:', e);
+  }
+}
+
+function calTitleText() {
+  if (calMode === 'month') {
+    return `${calCursor.getFullYear()}年${calCursor.getMonth() + 1}月`;
+  }
+  const { start, end } = calRange();
+  return `${start.getMonth() + 1}/${start.getDate()} ~ ${end.getMonth() + 1}/${end.getDate()}`;
+}
+
+function calSetMode(mode) {
+  calMode = mode;
+  document.getElementById('calModeMonth').classList.toggle('active', mode === 'month');
+  document.getElementById('calModeWeek').classList.toggle('active', mode === 'week');
+  document.getElementById('calMonthView').style.display = mode === 'month' ? '' : 'none';
+  document.getElementById('calWeekView').style.display = mode === 'week' ? '' : 'none';
+  calRender();
+}
+function calPrev() {
+  calCursor = calMode === 'month'
+    ? new Date(calCursor.getFullYear(), calCursor.getMonth() - 1, 1)
+    : calAddDays(calCursor, -7);
+  calRender();
+}
+function calNext() {
+  calCursor = calMode === 'month'
+    ? new Date(calCursor.getFullYear(), calCursor.getMonth() + 1, 1)
+    : calAddDays(calCursor, 7);
+  calRender();
+}
+function calToday() {
+  calCursor = new Date();
+  calRender();
+}
+
+// 事件的 CSS 定位辅助（用于周视图）
+function calTimeToPx(t) {
+  if (!t) return 0;
+  const parts = t.split(' ');
+  const hm = (parts.length > 1 ? parts[1] : parts[0]).split(':');
+  const h = +hm[0] || 0, m = +hm[1] || 0;
+  return (h + m / 60) * 60; // 每像素1分钟，1小时=60px
+}
+
+// ---- 月视图渲染 ----
+function calRenderMonth(start, end) {
+  const el = document.getElementById('calMonthView');
+  let html = '<div class="cal-month-header">';
+  for (let i = 0; i < 7; i++) html += `<div>周${DOW_CN[i]}</div>`;
+  html += '</div><div class="cal-month-grid">';
+
+  const todayStr = calFmt(new Date());
+  for (let d = new Date(start); d <= end; d = calAddDays(d, 1)) {
+    const ds = calFmt(d);
+    const dayEvents = calEvents.filter(e => e.date === ds);
+    const other = d.getMonth() !== calCursor.getMonth();
+    const isToday = ds === todayStr;
+    html += `<div class="cal-day-cell${other ? ' other-month' : ''}${isToday ? ' today' : ''}" onclick="calOpenDay('${ds}')">`;
+    html += `<div class="cal-day-num">${d.getDate()}</div>`;
+    html += '<div class="cal-day-events">';
+    dayEvents.slice(0, 4).forEach(ev => {
+      html += `<div class="cal-mini-event ${calEvColor(ev)}" title="${escapeHtml(ev.content)} (${calEvTimeLabel(ev)})" onclick="event.stopPropagation();calEditEvent(${ev.id})">${escapeHtml(calEvTimeLabel(ev))} ${escapeHtml(ev.content)}</div>`;
+    });
+    if (dayEvents.length > 4) html += `<div style="font-size:14px;color:var(--text-dim);">+${dayEvents.length - 4} 更多</div>`;
+    html += '</div></div>';
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+// 点击某天：弹出快速添加
+function calOpenDay(dateStr) {
+  const content = prompt('为 ' + dateStr + ' 添加日程：\n（输入内容，可包含开始时间 如 "09:00-10:30 会议"）');
+  if (!content) return;
+  let startT = '', endT = '', title = content;
+  const m = content.match(/^([0-9]{1,2}:[0-9]{2})\s*-\s*([0-9]{1,2}:[0-9]{2})\s*(.*)$/);
+  if (m) { startT = m[1]; endT = m[2]; title = m[3]; }
+  api('POST', '/api/calendar/events', { date: dateStr, content: title, start_time: startT, end_time: endT })
+    .then(() => calRender())
+    .catch(e => alert('添加失败: ' + e.message));
+}
+
+// ---- 周视图渲染（横轴日期 / 纵轴时间 / 可拖选） ----
+function calRenderWeek(start, end) {
+  const el = document.getElementById('calWeekView');
+  const todayStr = calFmt(new Date());
+  const HOURS = 24, PX_PER_HOUR = 60, TOTAL_PX = HOURS * PX_PER_HOUR;
+
+  // 表头
+  let hdr = '<div class="cal-week-header"><div class="cal-week-time-hdr"></div>';
+  for (let i = 0; i < 7; i++) {
+    const d = calAddDays(start, i);
+    const ds = calFmt(d);
+    const isToday = ds === todayStr;
+    hdr += `<div class="cal-week-day-hdr${isToday ? ' today' : ''}" onclick="calOpenDay('${ds}')"><span class="dow">周${DOW_CN[d.getDay()]}</span><span class="dom">${d.getMonth() + 1}/${d.getDate()}</span></div>`;
+  }
+  hdr += '</div>';
+  el.innerHTML = hdr;
+
+  // 主体
+  const body = document.createElement('div');
+  body.className = 'cal-week-body';
+
+  // 时间轴
+  const axis = document.createElement('div');
+  axis.className = 'cal-week-time-axis';
+  for (let h = 0; h < HOURS; h++) {
+    const lbl = document.createElement('div');
+    lbl.className = 'cal-time-label';
+    lbl.style.top = (h * PX_PER_HOUR) + 'px';
+    lbl.textContent = `${String(h).padStart(2,'0')}:00`;
+    axis.appendChild(lbl);
+  }
+  body.appendChild(axis);
+
+  // 7 列日期网格
+  const grid = document.createElement('div');
+  grid.className = 'cal-week-grid-container';
+  const colDatas = [];
+  for (let i = 0; i < 7; i++) {
+    const d = calAddDays(start, i);
+    const ds = calFmt(d);
+    const col = document.createElement('div');
+    col.className = 'cal-week-day-col' + (ds === todayStr ? ' today' : '');
+    col.dataset.date = ds;
+    col.style.height = TOTAL_PX + 'px';
+
+    // 时间横线
+    for (let h = 0; h <= HOURS; h++) {
+      const line = document.createElement('div');
+      line.className = 'cal-hour-line';
+      line.style.top = (h * PX_PER_HOUR) + 'px';
+      col.appendChild(line);
+    }
+    grid.appendChild(col);
+    colDatas.push({ date: ds, col });
+  }
+  body.appendChild(grid);
+  el.appendChild(body);
+
+  // 绘制事件（去掉时间显示，重叠事件均分横轴）
+  // 1. 按列分组
+  const colEvs = colDatas.map(c => ({ date: c.date, col: c.col, evs: [] }));
+  calEvents.forEach(ev => {
+    const idx = colDatas.findIndex(c => c.date === ev.date);
+    if (idx < 0) return;
+    const startPx = calTimeToPx(ev.start_time);
+    const endPx = ev.end_time ? calTimeToPx(ev.end_time) : startPx + 60;
+    colEvs[idx].evs.push({ ev, startPx, endPx: Math.max(endPx, startPx + 20), h: Math.max(endPx - startPx, 20) });
+  });
+
+  // 2. 每列计算重叠分组（泳道），给每个事件分配 lane 和总 lane 数
+  colEvs.forEach(cc => {
+    if (!cc.evs.length) return;
+    // 按开始时间排序
+    cc.evs.sort((a, b) => a.startPx - b.startPx || b.endPx - a.endPx);
+    // 贪心分泳道：记录每条泳道当前占用到的结束位置
+    const lanes = []; // 每个元素 = {end, events:[...]}
+    cc.evs.forEach(item => {
+      let placed = false;
+      for (const lane of lanes) {
+        if (item.startPx >= lane.end - 0.5) { // 不重叠，放入
+          lane.end = item.endPx;
+          lane.events.push(item);
+          item.laneIdx = lanes.indexOf(lane);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        lanes.push({ end: item.endPx, events: [item] });
+        item.laneIdx = lanes.length - 1;
+      }
+    });
+    cc.laneCount = lanes.length;
+  });
+
+  // 3. 渲染
+  colEvs.forEach(cc => {
+    cc.evs.forEach(item => {
+      const laneCount = cc.laneCount || 1;
+      const laneW = (100 / laneCount);
+      const evDiv = document.createElement('div');
+      evDiv.className = 'cal-week-event ' + calEvColor(item.ev);
+      evDiv.style.top = item.startPx + 'px';
+      evDiv.style.height = item.h + 'px';
+      evDiv.style.left = `calc(${item.laneIdx * laneW}% + 2px)`;
+      evDiv.style.width = `calc(${laneW}% - 4px)`;
+      // 只显示事件名称，不显示时间
+      evDiv.textContent = item.ev.content;
+      evDiv.title = `${calEvTimeLabel(item.ev)} ${item.ev.content}`;
+      evDiv.onclick = (e) => { e.stopPropagation(); calEditEvent(item.ev.id); };
+      cc.col.appendChild(evDiv);
+    });
+  });
+
+  // ---- 拖选创建日程 ----
+  let dragging = false, dragStart = null, dragEl = null;
+  // 吸附到 30 分钟网格（xx:00 / xx:30）
+  const snapMin = (min) => Math.round(min / 30) * 30;
+  const onMove = (e) => {
+    if (!dragging || !dragEl) return;
+    const rect = grid.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (x < 0 || y < 0 || y > TOTAL_PX) return;
+    const colW = rect.width / 7;
+    const colIdx = Math.min(Math.max(Math.floor(x / colW), 0), 6);
+    const startMin = snapMin(Math.max(0, dragStart.y / PX_PER_HOUR * 60));
+    const endMin = snapMin(Math.min(HOURS * 60, y / PX_PER_HOUR * 60));
+    const top = Math.min(startMin, endMin) / 60 * PX_PER_HOUR;
+    const hh = Math.max(Math.abs(endMin - startMin) / 60 * PX_PER_HOUR, 30);
+    dragEl.style.left = (colIdx * colW + 2) + 'px';
+    dragEl.style.width = (colW - 4) + 'px';
+    dragEl.style.top = top + 'px';
+    dragEl.style.height = hh + 'px';
+    dragEl.dataset.col = colIdx;
+    dragEl.dataset.startMin = Math.min(startMin, endMin);
+    dragEl.dataset.endMin = Math.max(startMin, endMin);
+  };
+  const onUp = async () => {
+    if (!dragging) return;
+    dragging = false;
+    if (dragEl && dragEl.dataset.col !== undefined) {
+      const colIdx = +dragEl.dataset.col;
+      const startMin = +dragEl.dataset.startMin;
+      const endMin = +dragEl.dataset.endMin;
+      const date = colDatas[colIdx].date;
+      const sh = String(Math.floor(startMin / 60)).padStart(2, '0');
+      const sm = String(startMin % 60).padStart(2, '0');
+      const eh = String(Math.floor(endMin / 60)).padStart(2, '0');
+      const em = String(endMin % 60).padStart(2, '0');
+      const title = prompt(`添加日程 (${date} ${sh}:${sm}~${eh}:${em}):`);
+      if (title && title.trim()) {
+        try {
+          await api('POST', '/api/calendar/events', {
+            date, content: title.trim(),
+            start_time: `${sh}:${sm}`, end_time: `${eh}:${em}`,
+          });
+        } catch(err) { alert('创建失败: ' + err.message); }
+      }
+    }
+    if (dragEl) { dragEl.remove(); dragEl = null; }
+    calRender();
+  };
+  grid.addEventListener('mousedown', (e) => {
+    const rect = grid.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (y < 0 || y > TOTAL_PX) return;
+    dragging = true;
+    // 起点吸附到 30 分钟
+    dragStart = { x, y: snapMin(Math.max(0, y / PX_PER_HOUR * 60)) / 60 * PX_PER_HOUR };
+    dragEl = document.createElement('div');
+    dragEl.className = 'cal-drag-select';
+    grid.appendChild(dragEl);
+  });
+  grid.addEventListener('mousemove', onMove);
+  grid.addEventListener('mouseup', onUp);
+  grid.addEventListener('mouseleave', () => { if (dragging) { dragging = false; if (dragEl) dragEl.remove(); dragEl = null; } });
+}
+
+// 编辑/删除事件
+function calEditEvent(id) {
+  const ev = calEvents.find(e => e.id === id);
+  if (!ev) return;
+  const action = prompt(
+    `事件: ${ev.content}\n时间: ${calEvTimeLabel(ev)}\n\n输入新内容以编辑，输入 [删除] 删除事件，或留空取消:`
+  );
+  if (action === null) return;
+  if (action.trim() === '[删除]') {
+    if (confirm('确定删除此日程？')) {
+      api('DELETE', '/api/calendar/events/' + id).then(calRender).catch(e => alert('删除失败: ' + e.message));
+    }
+    return;
+  }
+  if (action.trim()) {
+    api('PUT', '/api/calendar/events/' + id, { content: action.trim() })
+      .then(calRender).catch(e => alert('更新失败: ' + e.message));
+  }
+}
 
 // ========== CSV导入 ==========
 function openImportModal() {
