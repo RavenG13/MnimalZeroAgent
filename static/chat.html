@@ -1386,6 +1386,36 @@
         <option value="light">☀️ 浅色</option>
       </select>
     </div>
+    <!-- CalDAV 日历同步配置 -->
+    <div class="form-group" style="margin-bottom:14px;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="settingsCalDavEnabled" style="width:18px;height:18px;accent-color:#6c5ce7;" onchange="toggleCalDavFields()">
+        <span>📅 启用 CalDAV 日历同步（Radicale / Thunderbird）</span>
+      </label>
+      <div style="font-size:10px;color:#555;margin-top:3px;margin-left:26px;">
+        连接外部 CalDAV 服务器（如 Radicale），与 Thunderbird 等客户端双向同步日程。
+      </div>
+    </div>
+    <div id="caldavFields" style="display:none;margin-bottom:14px;padding-left:26px;">
+      <div class="form-group" style="margin-bottom:10px;">
+        <label for="settingsCalDavUrl">🌐 CalDAV 服务器地址</label>
+        <input type="text" id="settingsCalDavUrl" placeholder="http://localhost:5232"
+               style="width:100%;padding:10px 12px;background:#0f1117;border:1px solid #333;border-radius:6px;color:#e0e0e0;font-size:14px;outline:none;">
+        <div style="font-size:10px;color:#555;margin-top:3px;">例如：http://localhost:5232（Radicale 默认端口）</div>
+      </div>
+      <div class="form-group" style="margin-bottom:10px;">
+        <label for="settingsCalDavUser">👤 CalDAV 用户名</label>
+        <input type="text" id="settingsCalDavUser" placeholder="admin"
+               style="width:100%;padding:10px 12px;background:#0f1117;border:1px solid #333;border-radius:6px;color:#e0e0e0;font-size:14px;outline:none;">
+      </div>
+      <div class="form-group" style="margin-bottom:10px;">
+        <label for="settingsCalDavPass">🔑 CalDAV 密码</label>
+        <input type="password" id="settingsCalDavPass" placeholder="留空则不修改已保存的密码"
+               style="width:100%;padding:10px 12px;background:#0f1117;border:1px solid #333;border-radius:6px;color:#e0e0e0;font-size:14px;outline:none;">
+      </div>
+      <button class="btn secondary small" onclick="testCalDav()" style="font-size:12px;">🔍 测试连接</button>
+      <button class="btn secondary small" onclick="syncCalDav()" style="font-size:12px;margin-left:6px;">🔄 立即同步</button>
+    </div>
     <!-- 客户端节点状态 -->
     <div id="settingsNodes" style="margin-bottom:12px;">
       <div style="font-size:13px;color:#aaa;font-weight:500;margin-bottom:4px;">🖥️ 在线设备</div>
@@ -3189,6 +3219,67 @@ function calEditEvent(id) {
   }
 }
 
+// ========== CalDAV 设置相关函数 ==========
+function toggleCalDavFields() {
+  const enabled = document.getElementById('settingsCalDavEnabled').checked;
+  document.getElementById('caldavFields').style.display = enabled ? 'block' : 'none';
+}
+
+async function testCalDav() {
+  const msgEl = document.getElementById('settingsMsg');
+  msgEl.style.display = 'block';
+  msgEl.style.background = '#1a2a3a'; msgEl.style.color = '#60a5fa'; msgEl.style.border = '1px solid #2a3a5a';
+  msgEl.textContent = '⏳ 正在测试 CalDAV 连接...';
+  const url = document.getElementById('settingsCalDavUrl').value.trim();
+  const user = document.getElementById('settingsCalDavUser').value.trim();
+  const pass = document.getElementById('settingsCalDavPass').value.trim();
+  if (!url) { msgEl.textContent = '❌ 请输入 CalDAV 服务器地址'; msgEl.style.color = '#ff6b6b'; return; }
+  try {
+    const token = getToken();
+    const res = await fetch(SERVER_URL + '/api/caldav/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ url, username: user, password: pass })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      msgEl.style.background = '#1a2a1a'; msgEl.style.color = '#4ade80'; msgEl.style.border = '1px solid #2a4a2a';
+      msgEl.textContent = '✓ CalDAV 连接成功！' + (data.calendars ? ' 发现 ' + data.calendars.length + ' 个日历' : '');
+    } else {
+      msgEl.style.background = '#2a1a1a'; msgEl.style.color = '#ff6b6b'; msgEl.style.border = '1px solid #4a2a2a';
+      msgEl.textContent = '❌ 连接失败: ' + (data.message || '未知错误');
+    }
+  } catch(e) {
+    msgEl.style.background = '#2a1a1a'; msgEl.style.color = '#ff6b6b'; msgEl.style.border = '1px solid #4a2a2a';
+    msgEl.textContent = '❌ 网络错误: ' + e.message;
+  }
+}
+
+async function syncCalDav() {
+  const msgEl = document.getElementById('settingsMsg');
+  msgEl.style.display = 'block';
+  msgEl.style.background = '#1a2a3a'; msgEl.style.color = '#60a5fa'; msgEl.style.border = '1px solid #2a3a5a';
+  msgEl.textContent = '🔄 正在同步...';
+  try {
+    const token = getToken();
+    const res = await fetch(SERVER_URL + '/api/caldav/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      msgEl.style.background = '#1a2a1a'; msgEl.style.color = '#4ade80'; msgEl.style.border = '1px solid #2a4a2a';
+      msgEl.textContent = '✓ 同步完成: 拉取 ' + (data.pulled || 0) + ' 条, 推送 ' + (data.pushed || 0) + ' 条';
+    } else {
+      msgEl.style.background = '#2a1a1a'; msgEl.style.color = '#ff6b6b'; msgEl.style.border = '1px solid #4a2a2a';
+      msgEl.textContent = '❌ 同步失败: ' + (data.message || '未知错误');
+    }
+  } catch(e) {
+    msgEl.style.background = '#2a1a1a'; msgEl.style.color = '#ff6b6b'; msgEl.style.border = '1px solid #4a2a2a';
+    msgEl.textContent = '❌ 网络错误: ' + e.message;
+  }
+}
+
 // ========== CSV导入 ==========
 function openImportModal() {
   document.getElementById('importModal').classList.add('active');
@@ -3223,6 +3314,11 @@ async function openSettings() {
     document.getElementById('settingsBaseUrl').value = data.base_url || '';
     document.getElementById('settingsModel').value = data.model || '';
     document.getElementById('settingsThinking').checked = data.thinking_enabled || false;
+    document.getElementById('settingsCalDavEnabled').checked = data.has_caldav || false;
+    document.getElementById('settingsCalDavUrl').value = data.caldav_url || '';
+    document.getElementById('settingsCalDavUser').value = data.caldav_username || '';
+    document.getElementById('settingsCalDavPass').value = data.caldav_password || '';
+    toggleCalDavFields();
   } catch(e) {
     console.error('加载设置失败:', e);
   }
@@ -3280,6 +3376,18 @@ async function saveSettings() {
     if (baseUrl) body.base_url = baseUrl;
     if (model) body.model = model;
     body.thinking_enabled = document.getElementById('settingsThinking').checked;
+
+    // CalDAV 配置
+    const caldavEnabled = document.getElementById('settingsCalDavEnabled').checked;
+    if (caldavEnabled) {
+      body.caldav_url = document.getElementById('settingsCalDavUrl').value.trim();
+      body.caldav_username = document.getElementById('settingsCalDavUser').value.trim();
+      const caldavPass = document.getElementById('settingsCalDavPass').value.trim();
+      if (caldavPass && !caldavPass.startsWith('*')) body.caldav_password = caldavPass;
+    } else {
+      body.caldav_url = '';
+      body.caldav_username = '';
+    }
 
     // 保存主题
     const theme = document.getElementById('settingsTheme').value;

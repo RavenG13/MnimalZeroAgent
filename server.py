@@ -47,6 +47,7 @@ from tools import user_tools
 from tools import file_storage
 from tools import doc_tools
 from tools import calendar_tools
+from tools import caldav_sync
 from tools import scheduler as task_scheduler
 
 # ============================================================
@@ -748,6 +749,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
         user_tools.set_current_user(user_id)   # 让 create_tool 知道操作的是哪个用户
         doc_tools.set_current_user(user_id)    # 在线文档用户隔离
         calendar_tools.set_current_user(user_id)
+        caldav_sync.set_current_user(user_id)
         ptools._init_db(user_id)
 
         user_tools_schemas, user_tools_funcs = user_tools.load_user_tools_for_agent(user_id)
@@ -840,6 +842,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                 user_tools.set_current_user(user_id)
                 doc_tools.set_current_user(user_id)
                 calendar_tools.set_current_user(user_id)
+                caldav_sync.set_current_user(user_id)
 
                 print(f"[TOOL CALL] {name}({json.dumps(args, ensure_ascii=False)})")
 
@@ -872,6 +875,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                                 user_tools.set_current_user(username)
                                 doc_tools.set_current_user(username)
                                 calendar_tools.set_current_user(username)
+                                caldav_sync.set_current_user(username)
                                 return fn(**kw)
                             result = await asyncio.wait_for(
                                 asyncio.to_thread(_run_with_user, tool_func, user_id, **args),
@@ -1075,6 +1079,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                         user_tools.set_current_user(user_id)
                         doc_tools.set_current_user(user_id)
                         calendar_tools.set_current_user(user_id)
+                        caldav_sync.set_current_user(user_id)
 
                         # 工具路由
                         if "__" in name and name.split("__", 1)[0] in node_registry.get(user_id, {}):
@@ -1829,6 +1834,33 @@ async def api_calendar_delete(event_id: int, username: str = Depends(get_current
 
 
 # ============================================================
+#  CalDAV API — 远程日历同步
+# ============================================================
+
+@app.post("/api/caldav/test")
+async def api_caldav_test(req: dict, username: str = Depends(get_current_user)):
+    """测试 CalDAV 连接"""
+    caldav_sync.set_current_user(username)
+    url = req.get("url", "")
+    user = req.get("username", "")
+    pw = req.get("password", "")
+    if not url:
+        raise HTTPException(status_code=400, detail="请输入 CalDAV 服务器地址")
+    result = caldav_sync.test_connection(url, user, pw)
+    return result
+
+
+@app.post("/api/caldav/sync")
+async def api_caldav_sync(username: str = Depends(get_current_user)):
+    """触发 CalDAV 双向同步"""
+    caldav_sync.set_current_user(username)
+    result = caldav_sync.sync_calendar(username)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
+
+# ============================================================
 #  User API settings（每个用户可配置自己的 API Key / Base URL / Model）
 # ============================================================
 
@@ -1840,12 +1872,24 @@ async def api_get_settings(username: str = Depends(get_current_user)):
     raw_key = settings.get("api_key", "")
     if raw_key and len(raw_key) > 4:
         masked_key = "*" * (len(raw_key) - 4) + raw_key[-4:]
+    # CalDAV 密码掩码
+    raw_caldav_pw = settings.get("caldav_password", "")
+    masked_caldav_pw = ""
+    if raw_caldav_pw and len(raw_caldav_pw) > 4:
+        masked_caldav_pw = "*" * (len(raw_caldav_pw) - 4) + raw_caldav_pw[-4:]
+    elif raw_caldav_pw:
+        masked_caldav_pw = "****"
+
     return {
         "api_key": masked_key,
         "base_url": settings.get("base_url") or DEFAULT_BASE_URL,
         "model": settings.get("model") or DEFAULT_MODEL,
         "has_api_key": bool(raw_key),
         "thinking_enabled": settings.get("thinking_enabled", False),
+        "caldav_url": settings.get("caldav_url", ""),
+        "caldav_username": settings.get("caldav_username", ""),
+        "caldav_password": masked_caldav_pw,
+        "has_caldav": bool(settings.get("caldav_url")),
     }
 
 
@@ -1854,6 +1898,9 @@ class SettingsRequest(BaseModel):
     base_url: Optional[str] = None
     model: Optional[str] = None
     thinking_enabled: Optional[bool] = None
+    caldav_url: Optional[str] = None
+    caldav_username: Optional[str] = None
+    caldav_password: Optional[str] = None
 
 
 @app.put("/api/settings")
@@ -1868,6 +1915,12 @@ async def api_save_settings(req: SettingsRequest, username: str = Depends(get_cu
         settings["model"] = req.model
     if req.thinking_enabled is not None:
         settings["thinking_enabled"] = req.thinking_enabled
+    if req.caldav_url is not None:
+        settings["caldav_url"] = req.caldav_url
+    if req.caldav_username is not None:
+        settings["caldav_username"] = req.caldav_username
+    if req.caldav_password is not None and not req.caldav_password.startswith("*"):
+        settings["caldav_password"] = req.caldav_password
     _save_user_settings(username, settings)
 
     # 验证配置是否可用

@@ -44,7 +44,7 @@ def _get_conn(username: str = None) -> sqlite3.Connection:
 
 
 def _init_db(username: str = None):
-    """确保 schedule 表有 start_time / end_time 列"""
+    """确保 schedule 表有 uid / last_modified / caldav_etag 列（CalDAV 同步迁移）"""
     conn = _get_conn(username)
     try:
         cols = [r[1] for r in conn.execute("PRAGMA table_info(schedule)").fetchall()]
@@ -52,6 +52,18 @@ def _init_db(username: str = None):
             conn.execute("ALTER TABLE schedule ADD COLUMN start_time TEXT DEFAULT ''")
         if "end_time" not in cols:
             conn.execute("ALTER TABLE schedule ADD COLUMN end_time TEXT DEFAULT ''")
+        if "uid" not in cols:
+            conn.execute("ALTER TABLE schedule ADD COLUMN uid TEXT DEFAULT ''")
+        if "last_modified" not in cols:
+            conn.execute("ALTER TABLE schedule ADD COLUMN last_modified TEXT DEFAULT ''")
+        if "caldav_etag" not in cols:
+            conn.execute("ALTER TABLE schedule ADD COLUMN caldav_etag TEXT DEFAULT ''")
+        # 为旧数据补生成 uid（空 uid 的行）
+        rows = conn.execute("SELECT id FROM schedule WHERE uid = '' OR uid IS NULL").fetchall()
+        for r in rows:
+            import uuid as _uuid
+            conn.execute("UPDATE schedule SET uid = ?, last_modified = datetime('now','localtime') WHERE id = ? AND (uid = '' OR uid IS NULL)",
+                         (str(_uuid.uuid4()), r[0]))
         conn.commit()
     finally:
         conn.close()
@@ -153,14 +165,17 @@ def _parse_dt(date: str, time_str: str) -> str:
 
 def calendar_events_add(date: str, content: str, start_time: str = "", end_time: str = "", priority: str = "中") -> str:
     """添加日程事件"""
+    import uuid as _uuid
     _init_db()
     conn = _get_conn()
     try:
         start_dt = _parse_dt(date, start_time)
         end_dt = _parse_dt(date, end_time) if end_time else ""
+        uid = str(_uuid.uuid4())
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn.execute(
-            "INSERT INTO schedule (date, time_slot, content, priority, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)",
-            (date, start_time or "", content, priority, start_dt, end_dt),
+            "INSERT INTO schedule (date, time_slot, content, priority, start_time, end_time, uid, last_modified) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (date, start_time or "", content, priority, start_dt, end_dt, uid, now),
         )
         conn.commit()
         ev_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -238,6 +253,7 @@ def calendar_events_update(event_id: int, date: str = None, start_time: str = No
         if not updates:
             return "[提示] 没有要更新的字段"
 
+        updates.append("last_modified = datetime('now','localtime')")
         params.append(event_id)
         conn.execute(f"UPDATE schedule SET {', '.join(updates)} WHERE id = ?", params)
         conn.commit()
@@ -296,9 +312,12 @@ def api_add_event(data: dict, username: str = None) -> dict:
         priority = data.get("priority", "中")
         start_dt = _parse_dt(date, start_time)
         end_dt = _parse_dt(date, end_time) if end_time else ""
+        import uuid as _uuid
+        uid = str(_uuid.uuid4())
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cur = conn.execute(
-            "INSERT INTO schedule (date, time_slot, content, priority, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)",
-            (date, start_time or "", content, priority, start_dt, end_dt),
+            "INSERT INTO schedule (date, time_slot, content, priority, start_time, end_time, uid, last_modified) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (date, start_time or "", content, priority, start_dt, end_dt, uid, now),
         )
         conn.commit()
         ev_id = cur.lastrowid
@@ -337,6 +356,7 @@ def api_update_event(event_id: int, data: dict, username: str = None) -> dict:
         if not updates:
             return {"success": True, "event": dict(row)}
 
+        updates.append("last_modified = datetime('now','localtime')")
         params.append(event_id)
         conn.execute(f"UPDATE schedule SET {', '.join(updates)} WHERE id = ?", params)
         conn.commit()
