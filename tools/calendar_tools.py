@@ -58,6 +58,13 @@ def _init_db(username: str = None):
             conn.execute("ALTER TABLE schedule ADD COLUMN last_modified TEXT DEFAULT ''")
         if "caldav_etag" not in cols:
             conn.execute("ALTER TABLE schedule ADD COLUMN caldav_etag TEXT DEFAULT ''")
+        # 墓碑表：记录已删除事件的 UID（用于删除同步）
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS caldav_deleted (
+                uid TEXT PRIMARY KEY,
+                deleted_at TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
         # 为旧数据补生成 uid（空 uid 的行）
         rows = conn.execute("SELECT id FROM schedule WHERE uid = '' OR uid IS NULL").fetchall()
         for r in rows:
@@ -263,10 +270,17 @@ def calendar_events_update(event_id: int, date: str = None, start_time: str = No
 
 
 def calendar_events_delete(event_id: int) -> str:
-    """删除日程事件"""
+    """删除日程事件（记录墓碑 UID 用于 CalDAV 删除同步）"""
     _init_db()
     conn = _get_conn()
     try:
+        # 先查 uid，写入墓碑表（如果有）
+        row = conn.execute("SELECT uid FROM schedule WHERE id = ?", (event_id,)).fetchone()
+        if row and row["uid"]:
+            conn.execute(
+                "INSERT OR REPLACE INTO caldav_deleted (uid) VALUES (?)",
+                (row["uid"],),
+            )
         conn.execute("DELETE FROM schedule WHERE id = ?", (event_id,))
         conn.commit()
         if conn.total_changes > 0:
@@ -369,10 +383,17 @@ def api_update_event(event_id: int, data: dict, username: str = None) -> dict:
 
 
 def api_delete_event(event_id: int, username: str = None) -> dict:
-    """删除事件"""
+    """删除事件（记录墓碑 UID 用于 CalDAV 删除同步）"""
     _init_db(username)
     conn = _get_conn(username)
     try:
+        # 先查 uid，写入墓碑表
+        row = conn.execute("SELECT uid FROM schedule WHERE id = ?", (event_id,)).fetchone()
+        if row and row["uid"]:
+            conn.execute(
+                "INSERT OR REPLACE INTO caldav_deleted (uid) VALUES (?)",
+                (row["uid"],),
+            )
         conn.execute("DELETE FROM schedule WHERE id = ?", (event_id,))
         conn.commit()
         if conn.total_changes > 0:

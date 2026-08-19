@@ -369,17 +369,17 @@ def _parse_last_modified(lm_str):
 
 def sync_calendar(username=None):
     """
-    双向同步：按 UID 匹配，last_modified 取最新。
+    双向同步（含删除同步）：5 阶段处理。
     
-    流程：
-    1. 拉取远程事件列表（UID + ETag + last_modified + 数据）
-    2. 获取本地事件列表（uid + last_modified + 数据）
-    3. 构建两个索引：remote_by_uid / local_by_uid
-    4. 遍历远程事件：
-       - 本地有该 UID → 比较 last_modified，取最新覆盖
-       - 本地没有 → 创建
-    5. 遍历本地事件：
-       - 远程没有该 UID → 推送到远程
+    阶段1: 本地删除 → 远程（墓碑表处理）
+      墓碑 UID 在远程存在 → DELETE 远程 → 清墓碑
+      墓碑 UID 远程不存在 → 直接清墓碑
+    阶段2: 远程删除 → 本地
+      本地有、远程没有、caldav_etag 非空 → 删除本地（远程被删）
+    阶段3: 本地新建 → 远程
+      本地有、远程没有、caldav_etag 为空 → 推送（真新事件）
+    阶段4: 两端都有 → 比较 last_modified 取最新
+    阶段5: 远程有、本地没有 → 拉取创建
     """
     username = username or get_current_user()
     config = _get_caldav_config(username)
@@ -394,21 +394,27 @@ def sync_calendar(username=None):
         if not cal_url.endswith("/"):
             cal_url += "/"
 
-        # 1. 拉取远程
+        # 拉取远程
         remote_events = _fetch_remote_events(cal_url, config["username"], config["password"])
         remote_by_uid = {}
         for rev in remote_events:
             if rev.get("uid"):
                 remote_by_uid[rev["uid"]] = rev
 
-        # 2. 获取本地
+        # 获取本地 + 墓碑
         conn = _get_conn(username)
         if not conn:
             return {"success": False, "message": "本地数据库不存在"}
-
         try:
             local_rows = conn.execute("SELECT * FROM schedule").fetchall()
             local_events = [dict(r) for r in local_rows]
+            # 确保墓碑表存在
+            conn.execute("""CREATE TABLE IF NOT EXISTS caldav_deleted (
+                                uid TEXT PRIMARY KEY,
+                                deleted_at TEXT DEFAULT (datetime('now','localtime'))
+                            )""")
+            deleted_rows = conn.execute("SELECT uid FROM caldav_deleted").fetchall()
+            deleted_uids = {r["uid"] for r in deleted_rows}
         finally:
             conn.close()
 
@@ -421,14 +427,36 @@ def sync_calendar(username=None):
         pulled = 0
         updated = 0
         pushed = 0
+        deleted_remote = 0
+        deleted_local = 0
 
-        # 3. 处理远程事件
         conn = _get_conn(username)
         try:
+            # ===== 阶段1: 本地删除 → 远程 =====
+            for uid in list(deleted_uids):
+                if uid in remote_by_uid:
+                    # 远程存在 → 删除远程
+                    delete_url = cal_url + f"{uid}.ics"
+                    resp = _caldav_request("DELETE", delete_url,
+                                           config["username"], config["password"])
+                    if resp.status_code in (200, 204, 404):
+                        deleted_remote += 1
+                        del remote_by_uid[uid]
+                # 清墓碑（无论远程是否存在，墓碑使命完成）
+                conn.execute("DELETE FROM caldav_deleted WHERE uid = ?", (uid,))
+
+            # ===== 阶段2: 远程删除 → 本地 =====
+            for uid, lev in list(local_by_uid.items()):
+                if uid not in remote_by_uid and lev.get("caldav_etag", ""):
+                    # 之前已同步过，现在远程没有 → 远程被删 → 删除本地
+                    conn.execute("DELETE FROM schedule WHERE uid = ?", (uid,))
+                    deleted_local += 1
+                    del local_by_uid[uid]
+
+            # ===== 阶段4: 两端都有 → 比较 last_modified =====
             for uid, rev in remote_by_uid.items():
                 if uid in local_by_uid:
                     lev = local_by_uid[uid]
-                    # 比较修改时间
                     remote_lm = _parse_last_modified(rev.get("last_modified", ""))
                     local_lm = _parse_last_modified(lev.get("last_modified", ""))
                     if remote_lm > local_lm:
@@ -447,12 +475,10 @@ def sync_calendar(username=None):
                              rev.get("_etag", ""),
                              uid))
                         updated += 1
-                    elif local_lm > remote_lm:
-                        # 本地更新 → 推送到远程（见下面推送逻辑）
-                        pass
-                    # 相同则跳过
-                else:
-                    # 远程有本地没有 → 创建本地
+
+            # ===== 阶段5: 远程有、本地没有 → 拉取创建 =====
+            for uid, rev in remote_by_uid.items():
+                if uid not in local_by_uid:
                     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     conn.execute(
                         """INSERT INTO schedule (date, time_slot, content, priority, start_time, end_time, uid, last_modified, caldav_etag)
@@ -467,11 +493,12 @@ def sync_calendar(username=None):
                          rev.get("last_modified", now),
                          rev.get("_etag", "")))
                     pulled += 1
+                    local_by_uid[uid] = {"uid": uid, "caldav_etag": rev.get("_etag", "")}
             conn.commit()
         finally:
             conn.close()
 
-        # 4. 推送本地有远程没有的，以及本地更新的
+        # ===== 阶段3: 本地新建/本地更新 → 推送到远程 =====
         conn = _get_conn(username)
         try:
             local_rows = conn.execute("SELECT * FROM schedule").fetchall()
@@ -490,7 +517,7 @@ def sync_calendar(username=None):
                 if local_lm <= remote_lm:
                     continue  # 远程更新或相同，不推送
 
-            # 推送到远程
+            # 推送（新建：etag为空；本地更新：本地较新）
             ics = _event_to_vevent(lev)
             ical = f"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//ZeroAgent//EN\r\n{ics}\r\nEND:VCALENDAR"
             put_url = cal_url + f"{uid}.ics"
@@ -498,7 +525,6 @@ def sync_calendar(username=None):
                                    data=ical.encode("utf-8"))
             if resp.status_code in (200, 201, 204):
                 pushed += 1
-                # 保存远程返回的 ETag
                 new_etag = resp.headers.get("ETag", "").strip('"')
                 if new_etag:
                     conn2 = _get_conn(username)
@@ -514,6 +540,8 @@ def sync_calendar(username=None):
             "pulled": pulled,
             "updated": updated,
             "pushed": pushed,
+            "deleted_remote": deleted_remote,
+            "deleted_local": deleted_local,
             "remote_count": len(remote_events),
             "local_count": len(local_events),
         }
