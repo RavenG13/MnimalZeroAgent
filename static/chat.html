@@ -1145,6 +1145,8 @@
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/atom-one-dark.min.css">
 <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/highlight.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 </head>
 <body>
 
@@ -1752,6 +1754,7 @@ function addMessageToUI(role, content, toolCalls, roundIndex, msgData) {
         '</div>';
     }
     contentDiv.innerHTML = reasoningHtml + renderMarkdown(content);
+    renderMathInElement(contentDiv);
   }
   div.appendChild(contentDiv);
   const ts = document.createElement('div');
@@ -2138,6 +2141,7 @@ async function sendMessage() {
               setActiveSessionId(event.session_id);
             }
             contentDiv.classList.remove('streaming-cursor');
+            renderMathInElement(contentDiv);
             // 添加时间戳
             const ts = document.createElement('div');
             ts.className = 'timestamp';
@@ -2155,6 +2159,7 @@ async function sendMessage() {
             contentDiv.classList.remove('streaming-cursor');
             if (!fullContent) {
               contentDiv.innerHTML = renderMarkdown('**[错误]** ' + event.content);
+              renderMathInElement(contentDiv);
             } else {
               const errDiv = document.createElement('div');
               errDiv.style.cssText = 'color:#ff6b6b;font-size:12px;margin-top:6px;';
@@ -2174,6 +2179,7 @@ async function sendMessage() {
       } else {
         contentDiv.innerHTML = renderMarkdown('*[已取消]*');
       }
+      renderMathInElement(contentDiv);
       const ts = document.createElement('div');
       ts.className = 'timestamp';
       const badge = document.createElement('span');
@@ -2184,7 +2190,7 @@ async function sendMessage() {
       div.appendChild(ts);
     } else {
       const mc = div.querySelector('.msg-content');
-      if (mc) mc.innerHTML = renderMarkdown('**[错误]** ' + err.message);
+      if (mc) { mc.innerHTML = renderMarkdown('**[错误]** ' + err.message); renderMathInElement(mc); }
       else div.textContent = '[错误] ' + err.message;
       console.error(err);
     }
@@ -2699,7 +2705,7 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// ========== Markdown 渲染（marked + highlight.js）==========
+// ========== Markdown 渲染（marked + highlight.js + KaTeX）==========
 (function() {
   if (typeof marked !== 'undefined') {
     marked.setOptions({
@@ -2724,11 +2730,37 @@ function escapeHtml(text) {
   }
 })();
 
+// KaTeX 公式渲染（在 marked 生成 HTML 后处理）
+function renderMathInElement(el) {
+  if (typeof katex === 'undefined') return;
+  // 块级公式 $$...$$
+  el.innerHTML = el.innerHTML.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => {
+    try {
+      return katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false });
+    } catch(e) { return `$$${tex}$$`; }
+  });
+  // 行内公式 $...$（不匹配转义的 \$ 和空开头/结尾）
+  el.innerHTML = el.innerHTML.replace(/(?<![\\$])\$(?!\s)((?:[^$\\]|\\.)+?)\$(?!\$)/g, (_, tex) => {
+    try {
+      return katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false });
+    } catch(e) { return `$${tex}$`; }
+  });
+}
+
 function renderMarkdown(text) {
   if (!text) return '';
   try {
     if (typeof marked !== 'undefined') {
-      return marked.parse(text);
+      // 预处理：保护代码块中的 $ 不被公式解析
+      const codeBlocks = [];
+      let processed = text.replace(/(```[\s\S]*?```|`[^`]+`)/g, m => {
+        codeBlocks.push(m);
+        return `%%CODE${codeBlocks.length - 1}%%`;
+      });
+      processed = marked.parse(processed);
+      // 还原代码块
+      processed = processed.replace(/%%CODE(\d+)%%/g, (_, i) => codeBlocks[+i]);
+      return processed;
     }
   } catch(e) {
     console.error('Markdown parse error:', e);
@@ -2819,6 +2851,7 @@ function renderDocPreview(text) {
   } else {
     preview.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
   }
+  renderMathInElement(preview);
 }
 
 // 编辑器输入 → 自动保存（防抖 1s）
