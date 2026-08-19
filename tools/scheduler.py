@@ -21,7 +21,7 @@ os.makedirs(SCHEDULER_DIR, exist_ok=True)
 TASKS_FILE = os.path.join(SCHEDULER_DIR, "tasks.json")
 
 # 日志
-logging.basicConfig(level=logging.INFO, format="[Scheduler] %(asctime)s %(message)s")
+logger = logging.getLogger("scheduler")
 
 # 全局调度器
 _scheduler_thread = None
@@ -163,7 +163,7 @@ def _execute_task(task: dict):
     action_type = task["action_type"]
     params = task["action_params"]
     
-    logging.info(f"执行定时任务: {task['name']} (用户: {username})")
+    logger.info(f"执行定时任务: {task['name']} (用户: {username})")
     
     try:
         if action_type == "save_memory":
@@ -210,10 +210,10 @@ def _execute_task(task: dict):
                 break
         _save_tasks(tasks)
         
-        logging.info(f"定时任务执行成功: {task['name']}")
+        logger.info(f"定时任务执行成功: {task['name']}")
         
     except Exception as e:
-        logging.error(f"定时任务执行失败: {task['name']}: {e}")
+        logger.error(f"定时任务执行失败: {task['name']}: {e}")
 
 
 def _schedule_task(task: dict):
@@ -229,7 +229,7 @@ def _schedule_task(task: dict):
     timer.start()
     
     _active_timers[task["id"]] = timer
-    logging.info(f"调度任务 '{task['name']}' 将在 {delay:.0f} 秒后执行 (下次: {next_run})")
+    logger.info(f"调度任务 '{task['name']}' 将在 {delay:.0f} 秒后执行 (下次: {next_run})")
 
 
 def start_scheduler():
@@ -242,7 +242,7 @@ def start_scheduler():
     _stop_event.clear()
     
     def _loop():
-        logging.info("定时任务调度器已启动")
+        logger.info("定时任务调度器已启动")
         while not _stop_event.is_set():
             try:
                 tasks = _load_tasks()
@@ -255,10 +255,10 @@ def start_scheduler():
                 _stop_event.wait(30)
                 
             except Exception as e:
-                logging.error(f"调度器循环错误: {e}")
+                logger.error(f"调度器循环错误: {e}")
                 _stop_event.wait(60)
         
-        logging.info("定时任务调度器已停止")
+        logger.info("定时任务调度器已停止")
     
     _scheduler_thread = threading.Thread(target=_loop, daemon=True)
     _scheduler_thread.start()
@@ -270,4 +270,4 @@ def stop_scheduler():
     for timer in _active_timers.values():
         timer.cancel()
     _active_timers.clear()
-    logging.info("调度器已停止")
+    logger.info("调度器已停止")

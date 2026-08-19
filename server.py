@@ -15,6 +15,10 @@ import asyncio
 import time
 import copy
 import sqlite3
+import logging
+import atexit
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -61,6 +65,43 @@ HOST = os.environ.get("SERVER_HOST", "0.0.0.0")
 PORT = int(os.environ.get("SERVER_PORT", "8010"))
 DEBUG_MODE = False  # --debug 命令行参数开启
 DEBUG_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_logs")
+
+# ============================================================
+#  日志配置
+# ============================================================
+LOG_DIR = Path(os.path.dirname(os.path.abspath(__file__))) / "data" / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+def setup_logging():
+    """配置全局日志：终端 + 每日轮转文件（保留30天）"""
+    log_fmt = logging.Formatter(
+        "[%(asctime)s] %(levelname)-7s %(name)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    # 终端
+    console = logging.StreamHandler()
+    console.setFormatter(log_fmt)
+    root.addHandler(console)
+    # 文件（每天轮转，保留 30 天）
+    fh = TimedRotatingFileHandler(
+        LOG_DIR / "server.log",
+        when="midnight", backupCount=30, encoding="utf-8"
+    )
+    fh.setFormatter(log_fmt)
+    root.addHandler(fh)
+    # 退出时刷新所有 handler，防止日志丢失
+    def _flush_handlers():
+        for h in root.handlers[:]:
+            try:
+                h.flush()
+                h.close()
+            except Exception:
+                pass
+    atexit.register(_flush_handlers)
+
+logger = logging.getLogger("server")
 
 # 用户设置存储目录
 SETTINGS_DIR = os.path.join(os.path.dirname(__file__) or ".", "data", "settings")
@@ -280,7 +321,7 @@ def _cleanup_node(websocket):
             if data.get("ws") is websocket:
                 del node_registry[username][node_name]
                 _persist_node_offline(username, node_name)
-                print(f"[NODE] - {username}@{node_name} 已断开 (剩余节点: {list(node_registry.get(username, {}).keys())})")
+                logger.info(f"[NODE] - {username}@{node_name} 已断开 (剩余节点: {list(node_registry.get(username, {}).keys())})")
                 if not node_registry[username]:
                     del node_registry[username]
                 return
@@ -412,9 +453,9 @@ def _write_debug_log(username: str, session_id: str, user_message: str,
         with open(filepath, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
 
-        print(f"[DEBUG] 日志已保存: {filepath}")
+        logger.info(f"[DEBUG] 日志已保存: {filepath}")
     except Exception as e:
-        print(f"[DEBUG] 写日志失败: {e}")
+        logger.error(f"[DEBUG] 写日志失败: {e}")
 
 
 # 注意：不再使用全局 client。每个请求根据用户设置创建。
@@ -432,7 +473,7 @@ def discover_modules():
         sys.path.insert(0, tools_dir)
 
     if not os.path.isdir(tools_dir):
-        print(f"[WARNING] tools directory not found: {tools_dir}")
+        logger.warning(f"tools directory not found: {tools_dir}")
         return tools_list, func_map
 
     module_files = [f for f in os.listdir(tools_dir)
@@ -441,13 +482,13 @@ def discover_modules():
     for file in module_files:
         module_name = file[:-3]
         if module_name in CLOUD_BLOCKED_TOOLS:
-            print(f"[CLOUD] Skip unsafe tool module: {module_name}")
+            logger.info(f"Skip unsafe tool module: {module_name}")
             continue
 
         try:
             mod = importlib.import_module(f"tools.{module_name}")
         except Exception as e:
-            print(f"[WARNING] Cannot import module {module_name}: {e}")
+            logger.warning(f"Cannot import module {module_name}: {e}")
             continue
 
         for var_name in dir(mod):
@@ -502,7 +543,7 @@ tools.append({
 })
 func_map["list_connected_devices"] = list_connected_devices
 
-print(f"[CLOUD] Loaded {len(tools)} safe tools (含 list_connected_devices)")
+logger.info(f"Loaded {len(tools)} safe tools (含 list_connected_devices)")
 
 # ---- 工具调度器 ----
 def execute_tool(name: str, args: dict) -> str:
@@ -590,10 +631,10 @@ def get_or_create_session(user_id: str, session_id: str = None) -> Session:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     task_scheduler.start_scheduler()
-    print(f"[START] Scheduler started")
+    logger.info("Scheduler started")
     yield
     task_scheduler.stop_scheduler()
-    print(f"[SHUTDOWN] Scheduler stopped")
+    logger.info("Scheduler stopped")
 
 
 app = FastAPI(
@@ -641,9 +682,7 @@ async def global_exception_handler(request: Request, exc: Exception):
             content={"detail": exc.detail},
         )
     # 其他所有未捕获异常也返回 JSON
-    import traceback as _tb
-    print(f"[500] {type(exc).__name__}: {exc}")
-    _tb.print_exc()
+    logger.error(f"[500] {type(exc).__name__}: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={"detail": f"服务器内部错误: {type(exc).__name__}: {exc}"},
@@ -652,9 +691,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 static_dir = os.path.join(os.path.dirname(__file__) or ".", "static")
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
-    print(f"[STATIC] Mounted: {static_dir}")
+    logger.info(f"Static mounted: {static_dir}")
 else:
-    print(f"[WARNING] Static folder not found: {static_dir}")
+    logger.warning(f"Static folder not found: {static_dir}")
 
 
 class AuthRequest(BaseModel):
@@ -788,7 +827,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
 
             # Debug: 打印每轮传给 AI 的工具列表
             client_tool_names = [t["function"]["name"] for t in client_schemas]
-            print(f"[AI ROUND {round_count}] server_tools:{len(combined_tools)} "
+            logger.info(f"[AI ROUND {round_count}] server_tools:{len(combined_tools)} "
                   f"node_tools:{len(client_schemas)}"
                   + (f" ({', '.join(client_tool_names)})" if client_schemas else " (无客户端节点在线)"))
             call_messages = session.messages
@@ -844,7 +883,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                 calendar_tools.set_current_user(user_id)
                 caldav_sync.set_current_user(user_id)
 
-                print(f"[TOOL CALL] {name}({json.dumps(args, ensure_ascii=False)})")
+                logger.info(f"[TOOL CALL] {name}({json.dumps(args, ensure_ascii=False)})")
 
                 # ---- 工具路由：节点工具 vs 本地工具 ----
                 if "__" in name and name.split("__", 1)[0] in node_registry.get(user_id, {}):
@@ -888,7 +927,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                             )
                         except Exception as e:
                             error_detail = traceback.format_exc()
-                            print(f"[TOOL ERROR] {name}: {error_detail[:300]}")
+                            logger.warning(f"[TOOL ERROR] {name}: {error_detail[:300]}")
                             result = (
                                 f"[TOOL ERROR] {type(e).__name__}: {e}\n\n"
                                 f"Hint: The tool call failed. Analyze the error and try a different approach. "
@@ -896,7 +935,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
                             )
                     else:
                         result = f"[ERROR] Unknown tool: {name}. Available: {', '.join(sorted(combined_func_map.keys()))}"
-                print(f"[TOOL RESULT] {str(result)[:200]}")
+                logger.debug(f"[TOOL RESULT] {str(result)[:200]}")
 
                 tool_record = {
                     "name": name,
@@ -948,8 +987,7 @@ async def chat(req: ChatRequest, username: str = Depends(get_current_user)):
 
     except Exception as e:
         err_msg = f"{type(e).__name__}: {str(e)}"
-        print(f"[ERROR] chat: {err_msg}")
-        print(traceback.format_exc())
+        logger.error(f"[ERROR] chat: {err_msg}", exc_info=True)
         raise HTTPException(status_code=500, detail=err_msg)
 
 
@@ -990,6 +1028,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
 
             while round_count < max_rounds:
                 round_count += 1
+                logger.info(f"[STREAM] Round {round_count} start")
 
                 async_client, client_err = _get_user_async_client(user_id)
                 if client_err:
@@ -1072,6 +1111,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                                 args = {}
 
                         yield f"data: {json.dumps({'type': 'tool_start', 'name': name, 'args': args_raw, 'call_id': idx}, ensure_ascii=False)}\n\n"
+                        logger.info(f"[STREAM TOOL CALL] {name}({args_raw[:200]})")
 
                         ptools.set_current_user(user_id)
                         from tools import memory_tools as mt2
@@ -1231,8 +1271,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
             yield f"data: {json.dumps({'type': 'done', 'session_id': session.session_id, 'stopped': True}, ensure_ascii=False)}\n\n"
         except Exception as e:
             err_msg = f"{type(e).__name__}: {str(e)}"
-            print(f"[ERROR] chat_stream: {err_msg}")
-            print(traceback.format_exc())
+            logger.error(f"[ERROR] chat_stream: {err_msg}", exc_info=True)
             if DEBUG_MODE:
                 _write_debug_log(user_id, session.session_id, req.message,
                                  debug_rounds)
@@ -1454,7 +1493,7 @@ async def health():
 # ============================================================
 
 # 允许访问的表白名单
-_ALLOWED_TABLES = {"projects", "tasks", "schedule"}
+_ALLOWED_TABLES = {"projects", "tasks"}
 
 # 每张表的显示配置：隐藏列、计算列、JOIN 子句、列顺序
 # column_order 可选：{col_name: position}，position 越小越靠前（0-based）
@@ -1471,9 +1510,6 @@ _TABLE_DISPLAY_CONFIG = {
         },
     },
     "projects": {
-        "hidden_columns": set(),
-    },
-    "schedule": {
         "hidden_columns": set(),
     },
 }
@@ -2039,7 +2075,7 @@ async def websocket_node_endpoint(websocket: WebSocket):
                              work_root, interactive)
 
         tool_names = [t["function"]["name"] for t in tools_list]
-        print(f"[NODE] + {connected_user}@{node_name} "
+        logger.info(f"[NODE] + {connected_user}@{node_name} "
               f"({len(tool_names)} tools: {', '.join(tool_names)})")
         await websocket.send_json({
             "type": "tools_registered",
@@ -2057,12 +2093,12 @@ async def websocket_node_endpoint(websocket: WebSocket):
                 break
 
     except asyncio.TimeoutError:
-        print(f"[NODE] Handshake timeout")
+        logger.warning("[NODE] Handshake timeout")
     except WebSocketDisconnect:
         if connected_user and connected_node:
-            print(f"[NODE] - {connected_user}@{connected_node} 连接断开")
+            logger.info(f"[NODE] - {connected_user}@{connected_node} 连接断开")
     except Exception as e:
-        print(f"[NODE] WebSocket 错误 ({connected_user}@{connected_node}): {e}")
+        logger.error(f"[NODE] WebSocket 错误 ({connected_user}@{connected_node}): {e}", exc_info=True)
 
     _cleanup_node(websocket)
 
@@ -2072,23 +2108,29 @@ async def websocket_node_endpoint(websocket: WebSocket):
 # ============================================================
 if __name__ == "__main__":
     import sys as _sys
+    setup_logging()
+
     if "--debug" in _sys.argv or "-d" in _sys.argv:
         DEBUG_MODE = True
         _sys.argv = [a for a in _sys.argv if a not in ("--debug", "-d")]
-        print("[DEBUG] 调试模式已开启 — 每次对话将保存到 debug_logs/ 目录")
+        logger.info("调试模式已开启 — 每次对话将保存到 debug_logs/ 目录")
 
     local_url = f"http://127.0.0.1:{PORT}"
-    print("=" * 55)
-    print("         ZeroAgent Cloud Brain")
-    print("=" * 55)
-    print(f"  Web UI:   {local_url}")
-    print(f"  API Docs: {local_url}/docs")
-    print(f"  Model:    {DEFAULT_MODEL}")
-    print(f"  API URL:  {DEFAULT_BASE_URL}")
-    print(f"  API Key:  {'[OK] global default configured' if DEFAULT_API_KEY else '[!] need user config in settings'}")
-    print(f"  Tools:    {len(tools)} loaded")
-    print(f"  Debug:    {'ON (logs → debug_logs/)' if DEBUG_MODE else 'OFF'}")
-    print(f"  Blocked:  {', '.join(CLOUD_BLOCKED_TOOLS) if CLOUD_BLOCKED_TOOLS else '(none)'}")
-    print("=" * 55)
-    print(f"  Open {local_url} in browser to start")
+    banner = (
+        "=" * 55 + "\n"
+        "         ZeroAgent Cloud Brain\n" +
+        "=" * 55 + "\n"
+        f"  Web UI:   {local_url}\n"
+        f"  API Docs: {local_url}/docs\n"
+        f"  Model:    {DEFAULT_MODEL}\n"
+        f"  API URL:  {DEFAULT_BASE_URL}\n"
+        f"  API Key:  {'[OK] global default configured' if DEFAULT_API_KEY else '[!] need user config in settings'}\n"
+        f"  Tools:    {len(tools)} loaded\n"
+        f"  Debug:    {'ON (logs -> debug_logs/)' if DEBUG_MODE else 'OFF'}\n"
+        f"  Logs:     {LOG_DIR / 'server.log'}\n"
+        f"  Blocked:  {', '.join(CLOUD_BLOCKED_TOOLS) if CLOUD_BLOCKED_TOOLS else '(none)'}\n"
+        "=" * 55 + "\n"
+        f"  Open {local_url} in browser to start"
+    )
+    logger.info("\n" + banner)
     uvicorn.run(app, host=HOST, port=PORT, log_level="info")

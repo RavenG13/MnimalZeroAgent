@@ -348,54 +348,6 @@ project_tools = [
             },
         },
     },
-    # ---- 日程管理 ----
-    {
-        "type": "function",
-        "function": {
-            "name": "schedule_add",
-            "description": "添加一条日程安排",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "date": {"type": "string", "description": "日期，如 2026-06-05"},
-                    "content": {"type": "string", "description": "日程内容"},
-                    "time_slot": {"type": "string", "description": "时间段，如 早上/下午/晚上 或具体时间 14:00-16:00"},
-                    "priority": {"type": "string", "description": "优先级：高/中/低"},
-                },
-                "required": ["date", "content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "schedule_list",
-            "description": "查看某段时间的日程安排",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "start_date": {"type": "string", "description": "开始日期，如 2026-06-01"},
-                    "end_date": {"type": "string", "description": "结束日期，如 2026-06-07，不传则只查 start_date"},
-                },
-                "required": ["start_date"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "schedule_delete",
-            "description": "删除某条日程安排",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "date": {"type": "string", "description": "日期"},
-                    "content": {"type": "string", "description": "日程内容关键词，用于匹配删除"},
-                },
-                "required": ["date", "content"],
-            },
-        },
-    },
     # ---- 导入导出 ----
     {
         "type": "function",
@@ -772,69 +724,6 @@ def task_delete(project_name: str, task_name: str) -> str:
         conn.commit()
         affected = conn.total_changes
         return f"[成功] 任务 '{task_name}' 及其所有子任务已删除 (共 {affected} 条)"
-    finally:
-        conn.close()
-
-
-def schedule_add(date: str, content: str, time_slot: str = "", priority: str = "中") -> str:
-    """添加日程"""
-    conn = _get_conn()
-    try:
-        conn.execute(
-            "INSERT INTO schedule (date, time_slot, content, priority) VALUES (?, ?, ?, ?)",
-            (date, time_slot, content, priority),
-        )
-        conn.commit()
-        return f"[成功] 已添加日程: {date} {time_slot} - {content}"
-    finally:
-        conn.close()
-
-
-def schedule_list(start_date: str, end_date: str = None) -> str:
-    """查看日程"""
-    conn = _get_conn()
-    try:
-        if end_date:
-            rows = conn.execute(
-                "SELECT * FROM schedule WHERE date >= ? AND date <= ? ORDER BY date, time_slot",
-                (start_date, end_date),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM schedule WHERE date = ? ORDER BY time_slot",
-                (start_date,),
-            ).fetchall()
-    finally:
-        conn.close()
-
-    if not rows:
-        return f"[空] {start_date}{' ~ '+end_date if end_date else ''} 无日程安排"
-
-    lines = []
-    current_date = None
-    for r in rows:
-        if r["date"] != current_date:
-            current_date = r["date"]
-            lines.append(f"\n--- {current_date} ---")
-        ts = f" ({r['time_slot']})" if r["time_slot"] else ""
-        prio = f" [{r['priority']}]" if r["priority"] != "中" else ""
-        lines.append(f"  {ts} {r['content']}{prio}")
-    return "\n".join(lines)
-
-
-def schedule_delete(date: str, content: str) -> str:
-    """删除日程"""
-    conn = _get_conn()
-    try:
-        conn.execute(
-            "DELETE FROM schedule WHERE date = ? AND content LIKE ?",
-            (date, f"%{content}%"),
-        )
-        conn.commit()
-        affected = conn.total_changes
-        if affected > 0:
-            return f"[成功] 已删除 {date} 包含 '{content}' 的 {affected} 条日程"
-        return f"[失败] 未找到匹配的日程"
     finally:
         conn.close()
 

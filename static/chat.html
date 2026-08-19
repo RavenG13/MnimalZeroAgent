@@ -2403,7 +2403,7 @@ function renderSheetTabs() {
     container.innerHTML = '<span style="color:#444;font-size:11px;padding:0 8px;">暂无数据表</span>';
     return;
   }
-  const icons = {'projects': '📋', 'tasks': '📝', 'schedule': '📅'};
+  const icons = {'projects': '📋', 'tasks': '📝'};
   let html = '';
   tablesInfo.forEach(t => {
     const active = t.name === currentTable ? ' active' : '';
