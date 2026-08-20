@@ -35,7 +35,12 @@ cloud-agent/
 ├── client/                # 客户端节点（通过 WebSocket 连接服务器）
 │   ├── client.py          # 桌面客户端（P2P agent node）
 │   ├── auto_client.py     # 自动执行模式
-│   └── node_tools.py      # 本地工具（读文件、shell 等）
+│   └── node_tools.py      # 本地工具（读文件、写文件、搜索、shell、opencode）
+├── cli-csharp/            # C# 客户端（功能与 Python 客户端一致）
+│   └── ZeroAgentCli/
+│       ├── NodeTools.cs   # 工具实现（read/write/search/shell/opencode）
+│       ├── WsClient.cs    # WebSocket 客户端
+│       └── ...
 ├── data/                  # 所有持久化数据（用户隔离）
 │   ├── users.json         # 用户账号
 │   ├── users/<u>/         # 项目数据库 projects.db
@@ -82,6 +87,61 @@ schedule (id PK, date, time_slot, content, priority, created_at)
 - `tasks.parent_id` 自引用，支持无限层级任务嵌套
 - SQLite WAL 模式 (`PRAGMA journal_mode=WAL`)
 - 每用户独立 .db 文件
+
+## 文件工具 v2（局部编辑 + 搜索）
+
+服务端 `tools/file_tools.py` 和客户端 `client/node_tools.py` 均支持以下工具：
+
+### read_file
+```python
+read_file(file_path, start_line=0, end_line=0)
+# 整文件模式：不传行号，返回完整内容（大文件截断到前500行）
+# 行号范围模式：传 start_line/end_line，返回指定行范围（带行号）
+```
+
+### write_file — 三种模式
+| 模式 | 参数 | 用途 |
+|------|------|------|
+| 整文件 | `content` | 小文件覆盖（>30KB 自动拒绝） |
+| 行号替换 | `content` + `start_line` + `end_line` | 精准替换指定行 |
+| 文本匹配 | `old_text` + `new_text` + `expected_count` | 按内容匹配替换（推荐） |
+
+所有模式返回 **diff 摘要**（新增/删除行数 + unified diff 预览）。
+
+### search_in_file
+```python
+search_in_file(file_path, pattern, is_regex=False, case_sensitive=False)
+# 返回匹配的行号和内容（最多50条）
+```
+
+### 安全改进
+- 原子写入（临时文件 + `os.replace()`）
+- 大文件整写拒绝（>30KB）
+- 内容缩水检测（<30% 拒绝）
+- 变更比例警告（>40%）
+- `expected_count` 匹配次数校验
+
+### 推荐工作流
+```
+search_in_file → read_file(行号) → write_file(old_text/new_text) → diff 确认
+```
+
+## 客户端工具（run_opencode）
+
+客户端支持调用本地 opencode AI编程助手：
+
+```python
+run_opencode(
+    message: str,           # 任务描述（必填）
+    model: str = None,      # 模型，如 "anthropic/claude-sonnet-4-20250514"
+    session_id: str = None, # 继续之前的会话
+    cwd: str = None,        # 工作目录
+    auto: bool = False,     # 自动批准权限
+    timeout: int = 300,     # 超时（30-1800秒）
+)
+```
+
+适用于需要复杂代码修改、多文件重构、项目级任务的场景。C# 客户端功能一致。
 
 ## 前端架构（chat.html 单文件 SPA）
 

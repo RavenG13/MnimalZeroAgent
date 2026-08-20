@@ -1,6 +1,6 @@
 // ============================================================
 //  NodeTools - 固定工具实现（与 Python client/node_tools.py 一致）
-//  工具: read_file / write_file / list_files / run_shell / get_system_info
+//  工具: read_file / write_file / list_files / run_shell / get_system_info / run_opencode
 //  不依赖外部库，纯 .NET 标准库
 // ============================================================
 using System.Diagnostics;
@@ -39,6 +39,16 @@ public static class NodeTools
         new JsonSchema("get_system_info",
             "获取客户端设备的系统信息：操作系统、主机名、当前工作目录、运行时版本等。",
             Array.Empty<(string, string, string, bool)>()),
+        new JsonSchema("run_opencode",
+            "调用本地 opencode AI编程助手执行任务。\nopencode 是一个强大的 AI 编程工具，具备代码读写、文件搜索、命令执行等能力。\n适用于需要复杂代码修改、多文件重构、项目级任务的场景。\n返回 opencode 的执行结果文本。",
+            new (string Name, string Type, string Desc, bool Required)[] {
+                ("message", "string", "要发送给 opencode 的任务描述（自然语言）", true),
+                ("model", "string", "指定模型，格式为 provider/model。留空使用默认模型", false),
+                ("session_id", "string", "继续之前的会话 ID。留空则创建新会话", false),
+                ("cwd", "string", "opencode 的工作目录。留空使用客户端默认工作目录", false),
+                ("auto", "boolean", "是否自动批准权限（危险！仅限可信环境）。默认 false", false),
+                ("timeout", "integer", "超时秒数，默认 300，最大 1800（30分钟）", false)
+            }),
     };
 
     // ============================================================
@@ -55,6 +65,14 @@ public static class NodeTools
                 "list_files" => ListFiles(GetArg(args, "path", "") ?? "", root),
                 "run_shell" => RunShell(GetArg(args, "command", "")!, GetIntArg(args, "timeout", 60), root),
                 "get_system_info" => GetSystemInfo(root),
+                "run_opencode" => RunOpencode(
+                    GetArg(args, "message", "")!,
+                    root,
+                    GetArg(args, "model", null),
+                    GetArg(args, "session_id", null),
+                    GetArg(args, "cwd", null),
+                    GetBoolArg(args, "auto", false),
+                    GetIntArg(args, "timeout", 300, 30, 1800)),
                 _ => $"[错误] 未知工具: {name}",
             };
         }
@@ -75,6 +93,25 @@ public static class NodeTools
     {
         if (args.TryGetValue(key, out var v) && v is not null && int.TryParse(v.ToString(), out var n))
             return Math.Clamp(n, 1, 300);
+        return def;
+    }
+
+    static int GetIntArg(Dictionary<string, object?> args, string key, int def, int min, int max)
+    {
+        if (args.TryGetValue(key, out var v) && v is not null && int.TryParse(v.ToString(), out var n))
+            return Math.Clamp(n, min, max);
+        return def;
+    }
+
+    static bool GetBoolArg(Dictionary<string, object?> args, string key, bool def)
+    {
+        if (args.TryGetValue(key, out var v) && v is not null)
+        {
+            if (v is bool b) return b;
+            if (bool.TryParse(v.ToString(), out var result)) return result;
+            if (v.ToString()?.ToLower() == "true") return true;
+            if (v.ToString()?.ToLower() == "false") return false;
+        }
         return def;
     }
 
@@ -260,6 +297,149 @@ public static class NodeTools
         catch (Exception e)
         {
             return $"[错误] 执行命令失败: {e.Message}";
+        }
+    }
+
+    // ---- run_opencode ----
+    static string RunOpencode(string message, string root, string? model, string? sessionId,
+        string? cwd, bool auto, int timeout)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return "[错误] message 不能为空";
+
+        timeout = Math.Clamp(timeout, 30, 1800);
+
+        // 确定工作目录
+        string? workDir = null;
+        if (!string.IsNullOrWhiteSpace(cwd))
+        {
+            if (Path.IsPathRooted(cwd))
+                workDir = Path.GetFullPath(cwd);
+            else if (!string.IsNullOrEmpty(root))
+                workDir = Path.GetFullPath(Path.Combine(root, cwd));
+            else
+                workDir = Path.GetFullPath(cwd);
+        }
+        else if (!string.IsNullOrEmpty(root))
+        {
+            workDir = Path.GetFullPath(root);
+        }
+
+        // Windows 下 npm 安装的命令是 .cmd 文件，需要通过 cmd.exe 执行
+        bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+
+        // 检查 opencode 是否可用
+        try
+        {
+            var checkPsi = new ProcessStartInfo
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            if (isWindows)
+            {
+                checkPsi.FileName = "cmd.exe";
+                checkPsi.Arguments = "/c opencode --version";
+            }
+            else
+            {
+                checkPsi.FileName = "opencode";
+                checkPsi.Arguments = "--version";
+            }
+            using var checkProc = Process.Start(checkPsi);
+            if (checkProc != null)
+            {
+                checkProc.WaitForExit(10000);
+                if (checkProc.ExitCode != 0)
+                    return "[错误] opencode 未安装或不在 PATH 中。请先安装: npm install -g opencode";
+            }
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return "[错误] opencode 未找到。请先安装: npm install -g opencode";
+        }
+        catch
+        {
+            // 忽略检查错误，继续尝试执行
+        }
+
+        // 构建参数
+        var opencodeArgs = new StringBuilder();
+        opencodeArgs.Append("run ");
+        // 对 message 进行引号包裹
+        opencodeArgs.Append($"\"{message.Replace("\"", "\\\"")}\"");
+
+        if (!string.IsNullOrWhiteSpace(model))
+            opencodeArgs.Append($" --model \"{model}\"");
+
+        if (!string.IsNullOrWhiteSpace(sessionId))
+            opencodeArgs.Append($" --session \"{sessionId}\"");
+
+        if (auto)
+            opencodeArgs.Append(" --auto");
+
+        var psi = new ProcessStartInfo
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+
+        if (isWindows)
+        {
+            psi.FileName = "cmd.exe";
+            psi.Arguments = $"/c opencode {opencodeArgs}";
+        }
+        else
+        {
+            psi.FileName = "opencode";
+            psi.Arguments = opencodeArgs.ToString();
+        }
+
+        if (workDir != null)
+            psi.WorkingDirectory = workDir;
+
+        try
+        {
+            using var proc = Process.Start(psi);
+            if (proc is null) return "[错误] 无法启动 opencode 进程";
+
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+            var stderrTask = proc.StandardError.ReadToEndAsync();
+
+            if (!proc.WaitForExit(timeout * 1000))
+            {
+                try { proc.Kill(entireProcessTree: true); } catch { }
+                return $"[超时] opencode 在 {timeout}s 后未完成，已终止";
+            }
+
+            var stdout = stdoutTask.GetAwaiter().GetResult();
+            var stderr = stderrTask.GetAwaiter().GetResult();
+
+            var output = "";
+            if (!string.IsNullOrEmpty(stdout)) output += stdout;
+            if (!string.IsNullOrEmpty(stderr))
+            {
+                if (output.Length > 0 && !output.EndsWith("\n")) output += "\n";
+                output += stderr;
+            }
+            if (string.IsNullOrWhiteSpace(output))
+                output = $"[无输出] exit_code={proc.ExitCode}";
+
+            // 截断过长输出
+            if (output.Length > 50000)
+                output = output.Substring(0, 50000) + $"\n\n... [截断] 输出过长（{output.Length} 字符），仅显示前 50000 字符";
+
+            return output.TrimEnd();
+        }
+        catch (Exception e)
+        {
+            return $"[错误] 执行 opencode 失败: {e.Message}";
         }
     }
 
