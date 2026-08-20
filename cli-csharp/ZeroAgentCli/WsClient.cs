@@ -115,8 +115,25 @@ public static class WsClient
             }
         }
 
-        // 执行工具
-        string result = NodeTools.Execute(toolName, args, cfg.WorkRoot);
+        // 执行工具（带超时）
+        string result;
+        int timeoutSec = toolName switch
+        {
+            "run_shell" => Math.Clamp(args.TryGetValue("timeout", out var t) && int.TryParse(t?.ToString(), out var tv) ? tv : 60, 1, 300) + 10,
+            "run_opencode" => Math.Clamp(args.TryGetValue("timeout", out var t2) && int.TryParse(t2?.ToString(), out var tv2) ? tv2 : 300, 30, 1800) + 30,
+            _ => 120,
+        };
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(timeoutSec));
+            result = await Task.Run(() => NodeTools.Execute(toolName, args, cfg.WorkRoot), cts.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            result = $"[超时] 工具 '{toolName}' 执行超时 ({timeoutSec}s)";
+        }
 
         // 打印结果摘要
         var preview = result.Replace("\n", " ");

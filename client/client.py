@@ -853,6 +853,7 @@ async def _handle_tool_call(ws, msg: dict, interactive: bool, work_root: str):
     call_id = msg.get("call_id", "?")
     tool_name = msg.get("tool", "?")
     args = msg.get("args", {})
+    result_sent = False  # 防止重复发送结果
 
     print()
     print(C_CYAN(f"  🔧 [AI 调用] ") + C_BOLD(f"{tool_name}"))
@@ -877,20 +878,23 @@ async def _handle_tool_call(ws, msg: dict, interactive: bool, work_root: str):
     # 执行
     try:
         loop = asyncio.get_running_loop()
+        # 根据工具类型和参数计算超时时间
         if tool_name == "run_shell":
             timeout = args.get("timeout", 60)
-            # run_shell 可能很慢，增加线程执行超时
-            result = await asyncio.wait_for(
-                loop.run_in_executor(None, execute_tool, tool_name, args, work_root),
-                timeout=min(timeout + 10, 320),
-            )
+            exec_timeout = min(timeout + 10, 320)
+        elif tool_name == "run_opencode":
+            # run_opencode 可能需要很长时间（默认300秒，最大1800秒）
+            timeout = args.get("timeout", 300)
+            exec_timeout = min(timeout + 30, 1830)  # 额外30秒缓冲
         else:
-            result = await asyncio.wait_for(
-                loop.run_in_executor(None, execute_tool, tool_name, args, work_root),
-                timeout=60,
-            )
+            exec_timeout = 120  # 其他工具120秒
+
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, execute_tool, tool_name, args, work_root),
+            timeout=exec_timeout,
+        )
     except asyncio.TimeoutError:
-        result = "[超时] 工具执行超时"
+        result = f"[超时] 工具 '{tool_name}' 执行超时 ({exec_timeout}s)"
 
     # 打印结果摘要
     result_preview = result[:200].replace("\n", " ")
@@ -898,12 +902,14 @@ async def _handle_tool_call(ws, msg: dict, interactive: bool, work_root: str):
         result_preview += "..."
     print(C_DIM(f"     结果: {result_preview}"))
 
-    # 返回结果
-    await ws.send(json.dumps({
-        "type": "tool_result",
-        "call_id": call_id,
-        "result": result,
-    }, ensure_ascii=False))
+    # 返回结果（检查连接状态）
+    if not result_sent and ws.open:
+        result_sent = True
+        await ws.send(json.dumps({
+            "type": "tool_result",
+            "call_id": call_id,
+            "result": result,
+        }, ensure_ascii=False))
 
 
 # ============================================================

@@ -283,7 +283,7 @@ def _get_client_tool_schemas(username: str) -> list:
 
 
 async def _call_node_tool(username: str, node_name: str, tool_name: str,
-                           args: dict, timeout: int = 120) -> str:
+                           args: dict, timeout: int = 0) -> str:
     """通过 WebSocket 调用客户端节点的工具并等待结果。使用 asyncio.Lock 防止并发 recv。"""
     node_data = node_registry.get(username, {}).get(node_name)
     if not node_data:
@@ -292,6 +292,15 @@ async def _call_node_tool(username: str, node_name: str, tool_name: str,
     ws = node_data["ws"]
     lock = node_data["lock"]  # 每个连接一个锁，保证串行读写
     call_id = str(uuid.uuid4())
+
+    # 根据工具类型计算超时（如果未指定）
+    if timeout <= 0:
+        if tool_name == "run_shell":
+            timeout = args.get("timeout", 60) + 30  # shell 超时 + 30秒缓冲
+        elif tool_name == "run_opencode":
+            timeout = args.get("timeout", 300) + 60  # opencode 超时 + 60秒缓冲
+        else:
+            timeout = 180  # 其他工具180秒
 
     try:
         async with lock:
@@ -2083,12 +2092,12 @@ async def websocket_node_endpoint(websocket: WebSocket):
             "tool_count": len(tool_names),
         })
 
-        # --- 保持连接存活：定期检查节点是否仍在注册表中 ---
-        # 不发送应用层 ping/pong（会与 _call_node_tool 的 recv 冲突），
-        # 不持锁（避免阻塞工具调用）。
-        # 连接断开由 _call_node_tool 检测并通过 _cleanup_node 移除节点。
+        # --- 保持连接存活 ---
+        # 不发送任何 ping/pong（会与 _call_node_tool 的 recv 冲突）。
+        # 连接断开由 _call_node_tool 的异常检测并通过 _cleanup_node 移除节点。
         while True:
             await asyncio.sleep(30)
+            # 仅检查节点是否仍在注册表中（被其他地方移除时退出）
             if connected_user not in node_registry or node_name not in node_registry.get(connected_user, {}):
                 break
 
@@ -2133,4 +2142,15 @@ if __name__ == "__main__":
         f"  Open {local_url} in browser to start"
     )
     logger.info("\n" + banner)
-    uvicorn.run(app, host=HOST, port=PORT, log_level="info")
+    # 禁用 WebSocket ping（客户端执行长时间工具时无法响应 ping 会导致连接断开）
+    # 依靠工具调用自身的超时机制检测连接状态
+    config = uvicorn.Config(
+        app,
+        host=HOST,
+        port=PORT,
+        log_level="info",
+        ws_ping_interval=None,   # 禁用 WebSocket ping
+        ws_ping_timeout=None,    # 禁用 WebSocket ping 超时
+    )
+    server = uvicorn.Server(config)
+    server.run()
